@@ -58,26 +58,29 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [formData, setFormData] = useState<Partial<Transaction>>(
-    initialData || {
-      symbol: '',
-      date: getLocalDateString(),
-      side: 'Long',
-      result: 'Open',
-      rating: 'B',
-      uValue: 0,
-      stopLossReason: '',
-      entryReason: '',
-      review: '',
-      tagIds: [],
-      screenshots: [],
-      strategyId: '',
-      checklistScore: 0,
-      passedRequiredCheck: true,
-      missingRequiredItems: [],
-      checklistSnapshot: [],
-    }
-  );
+  const defaultData: Partial<Transaction> = {
+    symbol: '',
+    date: getLocalDateString(),
+    side: 'Long',
+    result: 'Open',
+    rating: 'B',
+    uValue: 0,
+    stopLossReason: '',
+    entryReason: '',
+    review: '',
+    tagIds: [],
+    screenshots: [],
+    strategyId: '',
+    checklistScore: 0,
+    passedRequiredCheck: true,
+    missingRequiredItems: [],
+    checklistSnapshot: [],
+  };
+
+  const [formData, setFormData] = useState<Partial<Transaction>>({
+    ...defaultData,
+    ...initialData
+  });
 
   // Local state for text fields to prevent typing lag
   const [localSymbol, setLocalSymbol] = useState(formData.symbol || '');
@@ -300,7 +303,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
                 <ShieldCheck size={14} /> 核心紀律規範 (Rule Template)
               </Label>
               <Select
-                value={formData.strategyId}
+                value={formData.strategyId || ''}
                 onValueChange={(value) => {
                   setFormData({ ...formData, strategyId: value });
                   setCheckedItemIds(new Set()); // Reset checks when switching strategy
@@ -472,7 +475,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
             <div className="space-y-2">
               <Label className="text-xs text-neutral-500 uppercase tracking-wider font-bold">多 / 空</Label>
               <Select
-                value={formData.side}
+                value={formData.side || 'Long'}
                 onValueChange={(value: Side) => setFormData({ ...formData, side: value })}
               >
                 <SelectTrigger className="bg-white text-black border-neutral-200 focus:ring-2 focus:ring-neutral-400 h-11">
@@ -488,7 +491,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
             <div className="space-y-2">
               <Label className="text-xs text-neutral-500 uppercase tracking-wider font-bold">盈虧狀態</Label>
               <Select
-                value={formData.result}
+                value={formData.result || 'Open'}
                 onValueChange={(value: Result) => setFormData({ ...formData, result: value })}
               >
                 <SelectTrigger className="bg-white text-black border-neutral-200 focus:ring-2 focus:ring-neutral-400 h-11">
@@ -505,7 +508,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
             <div className="space-y-2">
               <Label className="text-xs text-neutral-500 uppercase tracking-wider font-bold">交易評分</Label>
               <Select
-                value={formData.rating}
+                value={formData.rating || 'B'}
                 onValueChange={(value: Rating) => setFormData({ ...formData, rating: value })}
               >
                 <SelectTrigger className="bg-white text-black border-neutral-200 focus:ring-2 focus:ring-neutral-400 h-11">
