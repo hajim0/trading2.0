@@ -1,0 +1,5 @@
+{
+  "name": "Cloud Trading Journal",
+  "description": "A professional trading journal with Google Login, Cloud Sync, and Offline Mode support.",
+  "requestFramePermissions": []
+}
