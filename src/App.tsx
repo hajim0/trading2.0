@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Transaction, TradeStats, Tag, UserProfile, Plan, StrategyTemplate, StrategyChecklistItem, DisciplineMode } from './types';
 import { auth, googleProvider, signInWithPopup, signOut, db, OperationType, handleFirestoreError } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -18,11 +18,12 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Plus, LayoutDashboard, History, Settings, LogOut, Menu, X, Moon, Sun, BarChart2, Tags, Wifi, RefreshCw, ShieldAlert, Lock, Zap, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '@/lib/utils';
-import { Toaster } from 'sonner';
+import { cn, calculateTradeStats } from '@/lib/utils';
+import { Toaster, toast } from 'sonner';
 
 type View = 'dashboard' | 'list' | 'add' | 'edit' | 'detail' | 'analysis' | 'tags' | 'settings' | 'strategies';
 
+// --- Helper Components ---
 const GoogleIcon = () => (
   <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
     <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
@@ -30,6 +31,35 @@ const GoogleIcon = () => (
     <path d="M3.964 10.711c-.18-.54-.282-1.117-.282-1.711 0-.594.102-1.17.282-1.711V4.957H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.043l3.007-2.332z" fill="#FBBC05"/>
     <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.957l3.007 2.332C4.672 5.164 6.656 3.58 9 3.58z" fill="#EA4335"/>
   </svg>
+);
+
+const NavItem = ({ icon: Icon, label, active, locked, onClick }: any) => (
+  <button
+    onClick={onClick}
+    disabled={locked}
+    className={cn(
+      "w-full h-[48px] flex items-center gap-3 px-[14px] rounded-[14px] transition-all duration-200 relative group",
+      active 
+        ? "bg-white/[0.06] text-white/85 font-semibold" 
+        : "text-[#A0A0A0] hover:bg-[#1A1A1A] hover:text-white",
+      locked && "opacity-50 cursor-not-allowed"
+    )}
+  >
+    {active && (
+      <motion.div 
+        layoutId="activeNavIndicator"
+        className="absolute left-0 w-[3px] h-6 bg-white/80 rounded-full"
+      />
+    )}
+    <div className={cn(
+      "shrink-0 transition-all duration-200",
+      active ? "scale-105" : "group-hover:scale-105"
+    )}>
+      <Icon size={19} strokeWidth={active ? 2.5 : 2} />
+    </div>
+    <span className="text-[13px] tracking-tight font-medium">{label}</span>
+    {locked && <Lock size={12} className="ml-auto opacity-50" />}
+  </button>
 );
 
 export default function App() {
@@ -53,7 +83,9 @@ export default function App() {
   const [strategies, setStrategies] = useState<StrategyTemplate[]>([]);
   const [checklistItems, setChecklistItems] = useState<StrategyChecklistItem[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [initialCapital, setInitialCapital] = useState<number>(10000);
+  const [initialCapital, setInitialCapital] = useState<number | null>(null);
+  const [isProfileLoading, setIsProfileLoading] = useState(true);
+  const [localSettingsCapital, setLocalSettingsCapital] = useState<string>('');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('theme') as 'dark' | 'light') || 'dark';
   });
@@ -84,7 +116,8 @@ export default function App() {
     setUserProfile(null);
     setSelectedTransaction(null);
     setCurrentView('dashboard');
-    setInitialCapital(10000);
+    setInitialCapital(null);
+    setIsProfileLoading(true);
   };
 
   const effectiveUserId = user?.uid || null;
@@ -98,9 +131,7 @@ export default function App() {
   }, []);
   // Load user profile and initial capital
   useEffect(() => {
-    if (userProfile?.initialCapital !== undefined) {
-      setInitialCapital(userProfile.initialCapital);
-    }
+    // Already handled by onSnapshot in auth listener to avoid redundancy/overwriting
   }, [userProfile]);
 
   useEffect(() => {
@@ -175,53 +206,54 @@ export default function App() {
       setUser(u);
       
       try {
-        // 2. Fetch or create user profile
-        console.log('[Profile] checking /users/' + u.uid);
+        // Setup real-time sync for User Profile
         const profileRef = doc(db, 'users', u.uid);
-        let profileSnap = await getDoc(profileRef);
-        
-        if (!profileSnap.exists()) {
-          console.log('[Profile] creating /users/' + u.uid);
-          const profileData = {
-            uid: u.uid,
-            email: u.email || '',
-            displayName: u.displayName || '',
-            photoURL: u.photoURL || '',
-            plan: 'free',
-            disciplineMode: 'semi',
-            initialCapital: 10000,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          };
-          try {
-            await setDoc(profileRef, profileData);
-            console.log('[Profile] create success');
-            // Re-fetch to get server-side timestamps
-            profileSnap = await getDoc(profileRef);
-          } catch (err) {
-            console.error('[Profile] create failed:', err);
-            setAuthError('無法建立使用者設定檔，請檢查權限。');
-            setIsAuthLoading(false);
-            return;
-          }
-        }
-
-        const data = profileSnap.data() as UserProfile;
-        console.log('[Perf] cache loaded: user profile');
-        console.log('[Profile] ready for:', u.uid);
-        
-        // 3. Setup real-time sync for User Profile
-        const unsubProfile = onSnapshot(profileRef, (doc) => {
-          if (doc.exists()) {
-            const updatedData = doc.data() as UserProfile;
+        const unsubProfile = onSnapshot(profileRef, (snapshot) => {
+          if (snapshot.exists()) {
+            const updatedData = snapshot.data() as UserProfile;
             setUserProfile(updatedData);
+            
+            // Only update initialCapital state if it's different from current
+            // This prevents overwriting unsaved user edits in Settings
             if (updatedData.initialCapital !== undefined) {
-              setInitialCapital(updatedData.initialCapital);
+              setInitialCapital(prev => {
+                if (prev === null) {
+                  setLocalSettingsCapital(updatedData.initialCapital!.toString());
+                  return updatedData.initialCapital!;
+                }
+                return updatedData.initialCapital!;
+              });
+            } else {
+              setInitialCapital(10000);
+              setLocalSettingsCapital('10000');
             }
+            
             if (updatedData.disciplineMode) {
               setDisciplineMode(updatedData.disciplineMode);
             }
+          } else {
+            // Profile doesn't exist, create it once
+            const profileData: UserProfile = {
+              uid: u.uid,
+              email: u.email || '',
+              displayName: u.displayName || '',
+              photoURL: u.photoURL || '',
+              initialCapital: 10000,
+              plan: 'free',
+              role: 'user',
+              disciplineMode: 'semi',
+              createdAt: serverTimestamp() as any,
+              updatedAt: serverTimestamp() as any,
+            };
+            setDoc(profileRef, profileData);
           }
+          setIsProfileLoading(false);
+          setIsAuthLoading(false);
+          setIsSwitching(false);
+        }, (error) => {
+          console.error("Profile listen error:", error);
+          setIsProfileLoading(false);
+          setIsAuthLoading(false);
         });
         unsubscribes.current.push(unsubProfile);
 
@@ -334,96 +366,11 @@ export default function App() {
   }, [isOnline, user]);
 
   const stats = useMemo<TradeStats>(() => {
-    console.log('[Perf] trades recalculated');
-    // Only include closed trades for stats calculation
-    const closedTrades = transactions.filter(t => t.result !== 'Open');
-    const totalTrades = closedTrades.length;
-    const profitCount = closedTrades.filter(t => t.result === 'Profit').length;
-    const lossCount = closedTrades.filter(t => t.result === 'Loss').length;
-    const totalU = closedTrades.reduce((acc, t) => {
-      return acc + (t.result === 'Loss' ? -Math.abs(t.uValue) : Math.abs(t.uValue));
-    }, 0);
-    const winRate = totalTrades > 0 ? profitCount / (profitCount + lossCount || 1) : 0;
-
-    // Calculate Max Drawdown and Consecutive streaks using sorted closed trades
-    const sortedTx = [...closedTrades].sort((a, b) => 
-      new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
-
-    let currentEquity = initialCapital;
-    let peakEquity = initialCapital;
-    let maxDDPercent = 0;
-    
-    let currentWins = 0;
-    let maxWins = 0;
-    let currentLosses = 0;
-    let maxLosses = 0;
-    
-    let activeStreak = 0;
-    let activeStreakType: 'Profit' | 'Loss' | 'None' = 'None';
-
-    sortedTx.forEach(t => {
-      const val = t.result === 'Loss' ? -Math.abs(t.uValue) : Math.abs(t.uValue);
-      currentEquity += val;
-      
-      // Max Drawdown (Percentage based)
-      if (currentEquity > peakEquity) {
-        peakEquity = currentEquity;
-      }
-      
-      const ddAmount = peakEquity - currentEquity;
-      const ddPercent = peakEquity > 0 ? (ddAmount / peakEquity) * 100 : 0;
-      
-      if (ddPercent > maxDDPercent) {
-        maxDDPercent = ddPercent;
-      }
-
-      // Consecutive Streaks
-      if (t.result === 'Profit') {
-        currentWins++;
-        currentLosses = 0;
-        if (currentWins > maxWins) maxWins = currentWins;
-        activeStreak = currentWins;
-        activeStreakType = 'Profit';
-      } else if (t.result === 'Loss') {
-        currentLosses++;
-        currentWins = 0;
-        if (currentLosses > maxLosses) maxLosses = currentLosses;
-        activeStreak = currentLosses;
-        activeStreakType = 'Loss';
-      }
-    });
-
-    const profitTrades = closedTrades.filter(t => t.result === 'Profit');
-    const lossTrades = closedTrades.filter(t => t.result === 'Loss');
-    
-    const avgProfit = profitTrades.length > 0 
-      ? profitTrades.reduce((acc, t) => acc + Math.abs(t.uValue), 0) / profitTrades.length 
-      : 0;
-    const avgLoss = lossTrades.length > 0 
-      ? lossTrades.reduce((acc, t) => acc + Math.abs(t.uValue), 0) / lossTrades.length 
-      : 0;
-    const plRatio = avgLoss > 0 ? avgProfit / avgLoss : 0;
-
-    return { 
-      totalTrades, 
-      profitCount, 
-      lossCount, 
-      winRate, 
-      totalU,
-      maxDrawdown: maxDDPercent,
-      maxConsecutiveWins: maxWins,
-      maxConsecutiveLosses: maxLosses,
-      initialCapital,
-      currentStreak: activeStreak,
-      currentStreakType: activeStreakType,
-      averageProfit: avgProfit,
-      averageLoss: avgLoss,
-      profitLossRatio: plRatio
-    };
+    console.log('[Perf] stats recalculated');
+    return calculateTradeStats(transactions, initialCapital ?? 10000);
   }, [transactions, initialCapital]);
 
-  const handleAddGlobalTag = async (name: string): Promise<Tag> => {
+  const handleAddGlobalTag = useCallback(async (name: string): Promise<Tag> => {
     if (!effectiveUserId) {
       console.error('[Tag Write] Failed: User not logged in');
       throw new Error('User not logged in');
@@ -458,9 +405,9 @@ export default function App() {
       handleFirestoreError(error, OperationType.WRITE, `users/${effectiveUserId}/tags/${tagId}`);
       throw error;
     }
-  };
+  }, [effectiveUserId, tags]);
 
-  const handleRenameTag = async (id: string, newName: string) => {
+  const handleRenameTag = useCallback(async (id: string, newName: string) => {
     if (!effectiveUserId || !canUseTagManagement) return;
     try {
       const tagRef = doc(db, 'users', effectiveUserId, 'tags', id);
@@ -468,9 +415,9 @@ export default function App() {
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${effectiveUserId}/tags/${id}`);
     }
-  };
+  }, [effectiveUserId, canUseTagManagement]);
 
-  const handleDeleteTag = async (id: string) => {
+  const handleDeleteTag = useCallback(async (id: string) => {
     if (!effectiveUserId || !canUseTagManagement) return;
     try {
       const tagRef = doc(db, 'users', effectiveUserId, 'tags', id);
@@ -488,9 +435,9 @@ export default function App() {
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `users/${effectiveUserId}/tags/${id}`);
     }
-  };
+  }, [effectiveUserId, canUseTagManagement, transactions]);
 
-  const handleAdd = async (data: Partial<Transaction>) => {
+  const handleAdd = useCallback(async (data: Partial<Transaction>) => {
     if (!effectiveUserId) {
       console.error('[Trade Write] Failed: User not logged in');
       return;
@@ -517,14 +464,14 @@ export default function App() {
       handleFirestoreError(error, OperationType.WRITE, tradePath);
       throw error;
     }
-  };
+  }, [effectiveUserId]);
 
-  const handleUpdate = async (data: Partial<Transaction>) => {
+  const handleUpdate = useCallback(async (data: Partial<Transaction>) => {
     if (!effectiveUserId || !data.id) return;
     try {
       const txRef = doc(db, 'users', effectiveUserId, 'trades', data.id);
-      // Sanitize data: remove fields that shouldn't be updated or might cause type issues
-      const { id, userId, createdAt, syncStatus, ...updateData } = data;
+      // Sanitize data
+      const { id, userId, createdAt, syncStatus, ...updateData } = data as any;
       await updateDoc(txRef, {
         ...updateData,
         updatedAt: serverTimestamp()
@@ -534,9 +481,9 @@ export default function App() {
       handleFirestoreError(error, OperationType.WRITE, `users/${effectiveUserId}/trades/${data.id}`);
       throw error;
     }
-  };
+  }, [effectiveUserId]);
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = useCallback(async (id: string) => {
     if (!effectiveUserId) return;
     try {
       const txRef = doc(db, 'users', effectiveUserId, 'trades', id);
@@ -548,7 +495,7 @@ export default function App() {
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `users/${effectiveUserId}/trades/${id}`);
     }
-  };
+  }, [effectiveUserId, selectedTransaction]);
 
   const handleLogin = async () => {
     setIsAuthLoading(true);
@@ -641,27 +588,6 @@ export default function App() {
     }
   };
 
-  const NavItem = ({ icon: Icon, label, view, active, locked }: any) => (
-    <button
-      onClick={() => {
-        setCurrentView(view);
-        setIsSidebarOpen(false);
-      }}
-      className={cn(
-        "flex items-center gap-3 px-4 py-3 rounded-lg transition-all w-full text-left relative group",
-        active 
-          ? "bg-white text-black font-medium shadow-[0_0_20px_rgba(255,255,255,0.1)]" 
-          : "text-neutral-500 hover:text-white hover:bg-neutral-900"
-      )}
-    >
-      <Icon size={18} />
-      <span className="text-sm tracking-tight flex-1">{label}</span>
-      {locked && (
-        <Lock size={14} className="text-neutral-600 group-hover:text-primary transition-colors" />
-      )}
-    </button>
-  );
-
   return (
     <div 
       className="min-h-screen bg-background text-foreground flex flex-col md:flex-row font-sans transition-colors duration-300"
@@ -698,35 +624,69 @@ export default function App() {
 
       {/* Sidebar */}
       <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 w-64 bg-background border-r border-border p-6 flex flex-col gap-8 transition-transform duration-300 overflow-y-auto custom-scrollbar",
+        "fixed inset-y-0 left-0 z-50 w-72 bg-black border-r border-[#1A1A1A] p-6 flex flex-col gap-10 transition-transform duration-300 overflow-y-auto custom-scrollbar shadow-2xl md:shadow-none",
         isSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
       )}>
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 bg-foreground rounded-xl flex items-center justify-center shadow-[0_0_30px_rgba(0,0,0,0.1)] dark:shadow-[0_0_30px_rgba(255,255,255,0.2)]">
-            <div className="w-5 h-5 border-[3px] border-background rotate-45" />
+        <div className="flex items-center gap-4 px-2">
+          <div className="w-12 h-12 bg-white rounded-[16px] flex items-center justify-center shadow-[0_0_40px_rgba(255,255,255,0.1)]">
+            <div className="w-6 h-6 border-[4px] border-black rotate-45" />
           </div>
           <div className="flex flex-col">
-            <span className="font-black tracking-tighter text-xl leading-none uppercase">Elite</span>
-            <span className="text-[10px] text-neutral-500 tracking-[0.3em] font-bold uppercase">Journal</span>
+            <span className="font-black tracking-tight text-2xl leading-none text-white uppercase italic">Elite</span>
+            <span className="text-[11px] text-[#555] tracking-[0.4em] font-black uppercase mt-0.5 ml-0.5">Trader</span>
           </div>
         </div>
 
-        <nav className="space-y-1">
-          <NavItem icon={LayoutDashboard} label="總覽面板" view="dashboard" active={currentView === 'dashboard'} />
-          <NavItem icon={History} label="交易歷史" view="list" active={currentView === 'list'} />
-          <NavItem icon={BarChart2} label="標籤分析" view="analysis" active={currentView === 'analysis'} locked={!canUseTagAnalytics} />
-          <NavItem icon={ShieldAlert} label="紀律規範" view="strategies" active={currentView === 'strategies'} />
-          <NavItem icon={Tags} label="標籤管理" view="tags" active={currentView === 'tags'} locked={!canUseTagManagement} />
-          <NavItem icon={Settings} label="系統設定" view="settings" active={currentView === 'settings'} />
+        <nav className="space-y-1.5 min-w-0">
+          <NavItem 
+            icon={LayoutDashboard} 
+            label="總覽面板" 
+            active={currentView === 'dashboard'} 
+            onClick={() => { setCurrentView('dashboard'); setIsSidebarOpen(false); }} 
+          />
+          <NavItem 
+            icon={History} 
+            label="交易紀錄" 
+            active={currentView === 'list'} 
+            onClick={() => { setCurrentView('list'); setIsSidebarOpen(false); }} 
+          />
+          <NavItem 
+            icon={BarChart2} 
+            label="進階分析" 
+            active={currentView === 'analysis'} 
+            locked={!canUseTagAnalytics} 
+            onClick={() => { setCurrentView('analysis'); setIsSidebarOpen(false); }} 
+          />
+          <NavItem 
+            icon={Zap} 
+            label="策略與規範" 
+            active={currentView === 'strategies'} 
+            onClick={() => { setCurrentView('strategies'); setIsSidebarOpen(false); }} 
+          />
+          <NavItem 
+            icon={Tags} 
+            label="標籤管理" 
+            active={currentView === 'tags'} 
+            locked={!canUseTagManagement} 
+            onClick={() => { setCurrentView('tags'); setIsSidebarOpen(false); }} 
+          />
+          <NavItem 
+            icon={Settings} 
+            label="系統設定" 
+            active={currentView === 'settings'} 
+            onClick={() => { setCurrentView('settings'); setIsSidebarOpen(false); }} 
+          />
           
-          <div className="py-2" />
+          <div className="py-4 px-2">
+             <div className="h-px bg-[#1A1A1A]" />
+          </div>
           
           <button
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="flex items-center gap-3 px-4 py-3 rounded-lg transition-all w-full text-left text-neutral-500 hover:text-white hover:bg-neutral-900"
+            className="flex items-center gap-3 px-[14px] h-[48px] rounded-[14px] transition-all duration-200 w-full text-left text-[#A0A0A0] hover:text-white hover:bg-[#1A1A1A]"
           >
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-            <span className="text-sm tracking-tight">{theme === 'dark' ? '淺色模式' : '深色模式'}</span>
+            {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
+            <span className="text-[13px] tracking-tight font-medium">{theme === 'dark' ? '切換淺色' : '切換深色'}</span>
           </button>
 
           {effectiveUserId && (
@@ -737,28 +697,28 @@ export default function App() {
                   setIsSidebarOpen(false);
                 }}
                 className={cn(
-                  "flex items-center gap-3 px-4 py-3 rounded-lg transition-all w-full text-left",
+                  "flex items-center gap-3 px-[14px] h-[48px] rounded-[14px] transition-all duration-200 w-full text-left mt-1",
                   currentView === 'add'
-                    ? "bg-white text-black font-medium"
-                    : "text-neutral-500 hover:text-white hover:bg-neutral-900"
+                    ? "bg-white/[0.06] text-white/85 font-semibold"
+                    : "text-[#A0A0A0] hover:text-white hover:bg-[#1A1A1A]"
                 )}
               >
-                <Plus size={18} />
-                <span className="text-sm tracking-tight">新增紀錄</span>
+                <Plus size={19} />
+                <span className="text-[13px] tracking-tight font-medium">新增交易紀錄</span>
               </button>
               
               <button 
                 onClick={handleLogout}
-                className="flex items-center gap-3 px-4 py-3 rounded-lg transition-all w-full text-left text-neutral-500 hover:text-red-400 hover:bg-neutral-900"
+                className="flex items-center gap-3 px-[14px] h-[48px] rounded-[14px] transition-all duration-200 w-full text-left text-neutral-600 hover:text-red-400 hover:bg-neutral-900/50"
               >
-                <LogOut size={18} />
-                <span className="text-sm tracking-tight">登出系統</span>
+                <LogOut size={19} />
+                <span className="text-[13px] tracking-tight font-medium">退出系統</span>
               </button>
             </>
           )}
         </nav>
 
-        <div className="mt-auto pt-6 border-t border-border space-y-4">
+        <div className="mt-auto pt-6 border-t border-[#1A1A1A] space-y-4">
           {user && (
             <div className="flex flex-col gap-3">
               <div className="px-4 py-3 bg-neutral-900/50 rounded-xl border border-border flex items-center gap-3">
@@ -1015,26 +975,44 @@ export default function App() {
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs text-neutral-500 uppercase tracking-wider">初始金額 (u)</Label>
-                      <Input 
-                        type="number"
-                        value={initialCapital}
-                        onChange={async (e) => {
-                          const val = Number(e.target.value);
-                          setInitialCapital(val);
-                          if (effectiveUserId) {
-                            try {
-                              const profileRef = doc(db, 'users', effectiveUserId);
-                              await updateDoc(profileRef, {
-                                initialCapital: val,
-                                updatedAt: serverTimestamp()
-                              });
-                            } catch (error) {
-                              console.error('Failed to update initial capital:', error);
-                            }
-                          }
-                        }}
-                        className="bg-background border-border font-mono"
-                      />
+                      {isProfileLoading ? (
+                        <div className="h-10 bg-neutral-900 animate-pulse rounded border border-[#2A2A2A]" />
+                      ) : (
+                        <div className="flex gap-2">
+                          <Input 
+                            type="number"
+                            value={localSettingsCapital}
+                            onChange={(e) => setLocalSettingsCapital(e.target.value)}
+                            className="bg-background border-border font-mono flex-1"
+                          />
+                          <Button 
+                            variant="outline"
+                            className="bg-white text-black hover:bg-neutral-200 border-none font-black h-10 px-4"
+                            onClick={async () => {
+                              const val = Number(localSettingsCapital);
+                              if (isNaN(val)) return;
+                              
+                              const toastId = toast.loading('正在更新設定...');
+                              setInitialCapital(val);
+                              if (effectiveUserId) {
+                                try {
+                                  const profileRef = doc(db, 'users', effectiveUserId);
+                                  await updateDoc(profileRef, {
+                                    initialCapital: val,
+                                    updatedAt: serverTimestamp()
+                                  });
+                                  toast.success('初始資金已更新', { id: toastId });
+                                } catch (error) {
+                                  console.error('Failed to update initial capital:', error);
+                                  toast.error('更新失敗', { id: toastId });
+                                }
+                              }
+                            }}
+                          >
+                            存
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </div>
 

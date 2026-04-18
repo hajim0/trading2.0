@@ -281,25 +281,25 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
   };
 
   const getScoreColor = (score: number) => {
-    if (score >= 90) return "text-emerald-500";
+    if (score >= 90) return "text-[#22C55E]";
     if (score >= 70) return "text-yellow-500";
-    if (score >= 50) return "text-orange-500";
-    return "text-red-500";
+    if (score >= 50) return "text-[#EF4444]";
+    return "text-[#EF4444]";
   };
 
   return (
-    <Card className="bg-card border-border max-w-2xl mx-auto shadow-xl">
-      <CardHeader className="border-b border-border">
-        <CardTitle className="text-lg font-bold tracking-tight">
+    <Card className="bg-[#1A1A1A] border-[#2A2A2A] max-w-2xl mx-auto shadow-2xl">
+      <CardHeader className="border-b border-[#2A2A2A]">
+        <CardTitle className="text-lg font-black tracking-tighter uppercase">
           {initialData ? '編輯交易紀錄' : '新增交易紀錄'}
         </CardTitle>
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="p-6 space-y-8">
           {/* Section: Discipline Rules */}
-          <div className="space-y-4 p-4 rounded-2xl bg-primary/5 border border-primary/10">
+          <div className="space-y-4 p-4 rounded-xl bg-black border border-[#2A2A2A]">
             <div className="space-y-2">
-              <Label className="text-xs text-primary uppercase tracking-wider font-extrabold flex items-center gap-2">
+              <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-[0.2em] font-black flex items-center gap-2">
                 <ShieldCheck size={14} /> 核心紀律規範 (Rule Template)
               </Label>
               <Select
@@ -309,10 +309,10 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
                   setCheckedItemIds(new Set()); // Reset checks when switching strategy
                 }}
               >
-                <SelectTrigger className="bg-white text-black border-neutral-200 focus:ring-2 focus:ring-neutral-400 h-11">
+                <SelectTrigger className="bg-black text-white border-[#2A2A2A] focus:ring-0 focus:ring-offset-0 h-11 font-bold">
                   <SelectValue placeholder="選擇適用的紀律規範模板..." />
                 </SelectTrigger>
-                <SelectContent className="bg-card border-border">
+                <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A]">
                   <SelectItem value="">不使用規範模板 (自由交易)</SelectItem>
                   {strategies.map(s => (
                     <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
@@ -327,12 +327,12 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden border border-border rounded-xl bg-background/50"
+                  className="overflow-hidden border border-[#2A2A2A] rounded-lg bg-[#0B0B0B]"
                 >
-                  <div className="p-3 border-b border-border flex items-center justify-between cursor-pointer group" onClick={() => setIsChecklistExpanded(!isChecklistExpanded)}>
+                  <div className="p-3 border-b border-[#2A2A2A] flex items-center justify-between cursor-pointer group" onClick={() => setIsChecklistExpanded(!isChecklistExpanded)}>
                     <div className="flex items-center gap-2">
-                      <ListChecks className="text-primary h-4 w-4" />
-                      <span className="text-sm font-bold">出手前紀律核對</span>
+                      <ListChecks className="text-[#A0A0A0] h-4 w-4" />
+                      <span className="text-xs font-black uppercase tracking-widest text-[#A0A0A0]">出手前紀律核對</span>
                     </div>
                     <div className="flex items-center gap-4">
                       <div className={cn("text-base font-black font-mono", getScoreColor(metrics.score))}>
@@ -349,40 +349,40 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
                           <div 
                             key={item.id} 
                             className={cn(
-                              "flex items-center gap-3 p-3 rounded-lg transition-all cursor-pointer",
-                              checkedItemIds.has(item.id) ? "bg-primary/5 border-primary/20 border" : "bg-card border-border border hover:border-neutral-400"
+                              "flex items-center gap-3 p-3 rounded transition-all cursor-pointer border",
+                              checkedItemIds.has(item.id) ? "bg-[#22C55E]/5 border-[#22C55E]/20" : "bg-black border-[#2A2A2A] hover:border-[#3A3A3A]"
                             )}
                             onClick={() => handleToggleCheck(item.id)}
                           >
                             <div className={cn(
-                              "w-5 h-5 rounded-md flex items-center justify-center transition-colors",
-                              checkedItemIds.has(item.id) ? "bg-primary shadow-sm" : "border-2 border-neutral-300"
+                              "w-4 h-4 rounded-sm flex items-center justify-center transition-colors border",
+                              checkedItemIds.has(item.id) ? "bg-[#22C55E] border-[#22C55E]" : "border-[#3A3A3A]"
                             )}>
-                              {checkedItemIds.has(item.id) && <Check size={14} className="text-white" />}
+                              {checkedItemIds.has(item.id) && <Check size={12} className="text-black font-black" />}
                             </div>
                             <div className="flex-1">
-                              <p className={cn("text-xs font-semibold", !checkedItemIds.has(item.id) && "text-foreground/80")}>
+                              <p className={cn("text-xs font-bold uppercase tracking-tight", !checkedItemIds.has(item.id) && "text-[#A0A0A0]")}>
                                 {item.text}
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
-                              {item.required && <span className="text-[9px] px-1 bg-red-500/10 text-red-500 rounded font-bold">必要</span>}
-                              <span className="text-[10px] font-mono text-muted-foreground opacity-60">W{item.weight}</span>
+                              {item.required && <span className="text-[8px] px-1 bg-[#EF4444]/10 text-[#EF4444] rounded font-black uppercase">必達</span>}
+                              <span className="text-[10px] font-mono text-[#3A3A3A] font-bold">W{item.weight}</span>
                             </div>
                           </div>
                         ))}
                       </div>
 
-                      <div className="mt-2 p-2 bg-muted/30 rounded-lg flex flex-wrap gap-x-4 gap-y-1 text-[10px] uppercase tracking-wider font-bold">
-                         <span className="text-muted-foreground">符合項: {checkedItemIds.size} / {currentStrategyItems.length}</span>
+                      <div className="mt-2 p-2 bg-black rounded flex flex-wrap gap-x-4 gap-y-1 text-[10px] uppercase tracking-widest font-black">
+                         <span className="text-[#3A3A3A]">符合: {checkedItemIds.size} / {currentStrategyItems.length}</span>
                          {!metrics.passed && (
-                           <span className="text-red-500 flex items-center gap-1">
-                             <AlertCircle size={10} /> 缺少必要規範: {metrics.missing.length} 項
+                           <span className="text-[#EF4444] flex items-center gap-1">
+                             <AlertCircle size={10} /> 缺失必要項: {metrics.missing.length}
                            </span>
                          )}
                          {metrics.passed && checkedItemIds.size > 0 && (
-                           <span className="text-emerald-500 flex items-center gap-1">
-                             <ShieldCheck size={10} /> 規範核對通過
+                           <span className="text-[#22C55E] flex items-center gap-1">
+                             <ShieldCheck size={10} /> 紀律檢核通過
                            </span>
                          )}
                       </div>
@@ -395,21 +395,21 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
 
           {/* Section: Symbol & Meta */}
           <div className="space-y-4">
-            <div className="flex items-center gap-2 text-neutral-500 mb-2">
+            <div className="flex items-center gap-2 text-[#3A3A3A] mb-2">
               <Zap size={14} />
-              <span className="text-[10px] font-bold uppercase tracking-widest">交易基本資訊</span>
+              <span className="text-[10px] font-black uppercase tracking-[0.2em]">交易資訊</span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <Label className={cn(
-                "text-xs uppercase tracking-wider font-bold",
-                errors.symbol ? "text-red-500" : "text-neutral-500"
+                "text-[10px] uppercase tracking-widest font-black",
+                errors.symbol ? "text-[#EF4444]" : "text-[#A0A0A0]"
               )}>
-                幣種 / 商品 <span className="text-red-500">*</span>
+                幣種 / 商品
               </Label>
               <div className="relative">
                 <Input
-                  placeholder="例如 BTC, ETH, GOLD"
+                  placeholder="BTC, ETH, XAU..."
                   value={localSymbol}
                   maxLength={100}
                   onChange={(e) => {
@@ -419,41 +419,36 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
                   }}
                   onBlur={() => handleBlurText('symbol', localSymbol)}
                   className={cn(
-                    "bg-white text-black border-neutral-200 focus:ring-2 focus:ring-neutral-400 placeholder:text-neutral-400 h-11 pr-16",
-                    errors.symbol && "border-red-500 focus:ring-red-500"
+                    "bg-black text-white border-[#2A2A2A] focus:ring-0 focus:border-[#3A3A3A] placeholder:text-[#3A3A3A] h-11 pr-16 font-black uppercase tracking-tighter",
+                    errors.symbol && "border-[#EF4444]"
                   )}
                 />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-neutral-400 font-mono">
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#3A3A3A] font-mono">
                   {localSymbol.length}/100
                 </span>
               </div>
-              {errors.symbol && (
-                <p className="text-[10px] text-red-500 flex items-center gap-1">
-                  <AlertCircle size={10} /> {errors.symbol}
-                </p>
-              )}
             </div>
 
             <div className="space-y-2">
               <Label className={cn(
-                "text-xs uppercase tracking-wider font-bold",
-                errors.date ? "text-red-500" : "text-neutral-500"
+                "text-[10px] uppercase tracking-widest font-black",
+                errors.date ? "text-[#EF4444]" : "text-[#A0A0A0]"
               )}>
-                日期 <span className="text-red-500">*</span>
+                交易日期
               </Label>
               <Popover>
                 <PopoverTrigger
                   className={cn(
                     buttonVariants({ variant: "outline" }),
-                    "w-full justify-start text-left font-normal bg-black text-white border-white hover:bg-neutral-800 h-11",
-                    !formData.date && "text-neutral-400",
-                    errors.date && "border-red-500 text-red-500"
+                    "w-full justify-start text-left font-bold bg-black text-white border-[#2A2A2A] hover:bg-[#1A1A1A] h-11",
+                    !formData.date && "text-[#3A3A3A]",
+                    errors.date && "border-[#EF4444] text-[#EF4444]"
                   )}
                 >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  <CalendarIcon className="mr-2 h-4 w-4 text-[#3A3A3A]" />
                   {formData.date ? safeFormat(formData.date, "PPP") : <span>選擇日期</span>}
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-0 bg-card border-border">
+                <PopoverContent className="w-auto p-0 bg-[#1A1A1A] border-[#2A2A2A]">
                   <Calendar
                     mode="single"
                   selected={formData.date ? parseLocalDate(formData.date) : undefined}
@@ -465,71 +460,66 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
                   />
                 </PopoverContent>
               </Popover>
-              {errors.date && (
-                <p className="text-[10px] text-red-500 flex items-center gap-1">
-                  <AlertCircle size={10} /> {errors.date}
-                </p>
-              )}
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs text-neutral-500 uppercase tracking-wider font-bold">多 / 空</Label>
+              <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">方向</Label>
               <Select
                 value={formData.side || 'Long'}
                 onValueChange={(value: Side) => setFormData({ ...formData, side: value })}
               >
-                <SelectTrigger className="bg-white text-black border-neutral-200 focus:ring-2 focus:ring-neutral-400 h-11">
+                <SelectTrigger className="bg-black text-white border-[#2A2A2A] focus:ring-0 h-11 font-bold">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-card border-border">
-                  <SelectItem value="Long">多 (Long)</SelectItem>
-                  <SelectItem value="Short">空 (Short)</SelectItem>
+                <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A]">
+                  <SelectItem value="Long">LONG (多)</SelectItem>
+                  <SelectItem value="Short">SHORT (空)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs text-neutral-500 uppercase tracking-wider font-bold">盈虧狀態</Label>
+              <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">盈虧結果</Label>
               <Select
                 value={formData.result || 'Open'}
                 onValueChange={(value: Result) => setFormData({ ...formData, result: value })}
               >
-                <SelectTrigger className="bg-white text-black border-neutral-200 focus:ring-2 focus:ring-neutral-400 h-11">
+                <SelectTrigger className="bg-black text-white border-[#2A2A2A] focus:ring-0 h-11 font-bold">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-card border-border">
-                  <SelectItem value="Profit">盈利 (+)</SelectItem>
-                  <SelectItem value="Loss">虧損 (-)</SelectItem>
-                  <SelectItem value="Open">進行中</SelectItem>
+                <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A]">
+                  <SelectItem value="Profit" className="text-[#22C55E]">PROFIT (+)</SelectItem>
+                  <SelectItem value="Loss" className="text-[#EF4444]">LOSS (-)</SelectItem>
+                  <SelectItem value="Open">OPEN (進行中)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs text-neutral-500 uppercase tracking-wider font-bold">交易評分</Label>
+              <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">執行評分</Label>
               <Select
                 value={formData.rating || 'B'}
                 onValueChange={(value: Rating) => setFormData({ ...formData, rating: value })}
               >
-                <SelectTrigger className="bg-white text-black border-neutral-200 focus:ring-2 focus:ring-neutral-400 h-11">
+                <SelectTrigger className="bg-black text-white border-[#2A2A2A] focus:ring-0 h-11 font-bold">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-card border-border">
-                  <SelectItem value="A">A (完美執行)</SelectItem>
-                  <SelectItem value="B">B (符合計畫)</SelectItem>
-                  <SelectItem value="C">C (情緒交易)</SelectItem>
+                <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A]">
+                  <SelectItem value="A">Grade A (完美執行)</SelectItem>
+                  <SelectItem value="B">Grade B (符合計畫)</SelectItem>
+                  <SelectItem value="C">Grade C (情緒交易)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs text-neutral-500 uppercase tracking-wider font-bold">u 數值 (盈虧金額)</Label>
+              <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">u 盈虧金額</Label>
               <Input
                 type="number"
                 placeholder="0"
                 value={formData.uValue}
                 onChange={(e) => setFormData({ ...formData, uValue: parseFloat(e.target.value) || 0 })}
-                className="bg-white text-black border-neutral-200 font-mono focus:ring-2 focus:ring-neutral-400 placeholder:text-neutral-400 h-11"
+                className="bg-black text-white border-[#2A2A2A] font-mono focus:ring-0 placeholder:text-[#3A3A3A] h-11 font-black"
               />
             </div>
           </div>
@@ -537,15 +527,15 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
 
           {/* Section: Signals & Reasons */}
           <div className="space-y-6">
-            <div className="flex items-center gap-2 text-neutral-500 mb-2">
+            <div className="flex items-center gap-2 text-[#3A3A3A] mb-2">
               <BarChart2 size={14} />
-              <span className="text-[10px] font-bold uppercase tracking-widest">市場特徵與技術訊號 (Signals)</span>
+              <span className="text-[10px] font-black uppercase tracking-[0.2em]">技術訊號與復盤</span>
             </div>
             
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label className="text-xs text-neutral-500 uppercase tracking-wider font-bold">
-                  進場特徵標籤 (例如: FVG, CHOCH, SMT)
+                <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">
+                  標籤 (例如: FVG, MSS, OB)
                 </Label>
                 <TagInput
                   selectedTagIds={formData.tagIds || []}
@@ -559,111 +549,88 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
 
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
-                  <Label className="text-xs text-neutral-500 uppercase tracking-wider font-bold">進場理由詳述</Label>
-                  <span className={cn("text-[10px] tabular-nums", localEntryReason.length >= 10000 ? "text-red-500 font-bold" : "text-neutral-400")}>
-                    {localEntryReason.length}/10000
-                  </span>
+                  <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">進場邏輯</Label>
                 </div>
                 <Textarea
-                  placeholder="描述為什麼進場 (結構、訊號、盤感)..."
+                  placeholder="為什麼要在這裡出手..."
                   value={localEntryReason}
                   maxLength={10000}
                   onChange={(e) => setLocalEntryReason(e.target.value)}
                   onBlur={() => handleBlurText('entryReason', localEntryReason)}
-                  className="bg-white text-black border-neutral-200 min-h-[100px] focus:ring-2 focus:ring-neutral-400 placeholder:text-neutral-400"
+                  className="bg-black text-white border-[#2A2A2A] min-h-[100px] focus:ring-0 placeholder:text-[#3A3A3A] font-bold"
                 />
               </div>
             </div>
           </div>
 
           <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <Label className="text-xs text-neutral-500 uppercase tracking-wider font-bold">止損原因 / 計畫</Label>
-              <span className={cn("text-[10px] tabular-nums", localStopLossReason.length >= 10000 ? "text-red-500 font-bold" : "text-neutral-400")}>
-                {localStopLossReason.length}/10000
-              </span>
-            </div>
+            <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">止損原因</Label>
             <Textarea
-              placeholder="描述止損計畫或原因..."
+              placeholder="止損或減倉計畫..."
               value={localStopLossReason}
               maxLength={10000}
               onChange={(e) => setLocalStopLossReason(e.target.value)}
               onBlur={() => handleBlurText('stopLossReason', localStopLossReason)}
-              className="bg-white text-black border-neutral-200 min-h-[100px] focus:ring-2 focus:ring-neutral-400 placeholder:text-neutral-400"
+              className="bg-black text-white border-[#2A2A2A] min-h-[100px] focus:ring-0 placeholder:text-[#3A3A3A] font-bold"
             />
           </div>
 
           <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <Label className="text-xs text-neutral-500 uppercase tracking-wider font-bold">復盤紀錄</Label>
-              <span className={cn("text-[10px] tabular-nums", localReview.length >= 10000 ? "text-red-500 font-bold" : "text-neutral-400")}>
-                {localReview.length}/10000
-              </span>
-            </div>
+            <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">復盤</Label>
             <Textarea
-              placeholder="總結這次交易..."
+              placeholder="總結心得..."
               value={localReview}
               maxLength={10000}
               onChange={(e) => setLocalReview(e.target.value)}
               onBlur={() => handleBlurText('review', localReview)}
-              className="bg-white text-black border-neutral-200 min-h-[120px] focus:ring-2 focus:ring-neutral-400 placeholder:text-neutral-400"
+              className="bg-black text-white border-[#2A2A2A] min-h-[120px] focus:ring-0 placeholder:text-[#3A3A3A] font-bold"
             />
           </div>
 
           <div className="space-y-4">
-            <Label className="text-xs text-neutral-500 uppercase tracking-wider font-bold">交易截圖</Label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+            <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">截圖</Label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {formData.screenshots?.map((src, i) => (
-                <div key={`screenshot-${i}`} className="relative group aspect-video rounded-lg overflow-hidden border border-neutral-800">
+                <div key={`screenshot-${i}`} className="relative group aspect-video rounded border border-[#2A2A2A] overflow-hidden">
                   <img src={src} alt={`Screenshot ${i}`} className="w-full h-full object-cover" />
                   <button
                     type="button"
                     onClick={() => removeImage(i)}
-                    className="absolute top-1 right-1 bg-black/50 p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute top-1 right-1 bg-black/80 p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                   >
-                    <X size={14} />
+                    <X size={12} />
                   </button>
                 </div>
               ))}
-              <label className="aspect-video rounded-lg border border-dashed border-neutral-700 flex flex-col items-center justify-center gap-2 cursor-pointer hover:bg-neutral-900 transition-colors">
-                <ImagePlus size={20} className="text-neutral-500" />
-                <span className="text-[10px] text-neutral-500 uppercase">上傳圖片</span>
+              <label className="aspect-video rounded border border-dashed border-[#2A2A2A] flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-black transition-colors">
+                <ImagePlus size={16} className="text-[#3A3A3A]" />
+                <span className="text-[8px] text-[#3A3A3A] uppercase font-black">Upload</span>
                 <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} />
               </label>
             </div>
           </div>
 
-          <div className="flex gap-3 pt-4">
+          <div className="flex gap-3 pt-6 border-t border-[#2A2A2A]">
             <Button 
               type="button"
               variant="outline" 
-              className="flex-1 border-neutral-800 h-12 font-bold" 
+              className="flex-1 border-[#2A2A2A] h-12 font-black uppercase tracking-widest text-[#A0A0A0]" 
               onClick={onCancel} 
               disabled={isSubmitting}
             >
-              取消
+              Cancel
             </Button>
             <Button 
               type="submit"
               className={cn(
-                "flex-1 h-12 font-bold shadow-lg transition-all",
+                "flex-1 h-12 font-black uppercase tracking-widest shadow-2xl transition-all",
                 (disciplineMode === 'strict' && !metrics.passed && formData.strategyId) 
-                  ? "bg-neutral-800 text-neutral-500 cursor-not-allowed border border-neutral-700" 
+                  ? "bg-[#1A1A1A] text-[#3A3A3A] cursor-not-allowed" 
                   : "bg-white text-black hover:bg-neutral-200"
               )} 
               disabled={isSubmitting}
             >
-              {isSubmitting ? (
-                <div className="flex items-center gap-2">
-                  <RefreshCw className="animate-spin" size={18} />
-                  儲存中...
-                </div>
-              ) : (disciplineMode === 'strict' && !metrics.passed && formData.strategyId) ? (
-                <div className="flex items-center gap-2">
-                  <Lock size={16} />
-                  嚴格模式鎖定
-                </div>
-              ) : '儲存紀錄'}
+              {isSubmitting ? 'Saving...' : (disciplineMode === 'strict' && !metrics.passed && formData.strategyId) ? 'Locked' : 'Save Record'}
             </Button>
           </div>
         </CardContent>

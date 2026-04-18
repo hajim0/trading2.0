@@ -16,6 +16,33 @@ interface TransactionDetailProps {
 
 import { auth } from '../firebase';
 
+// --- Helper Components ---
+const InfoItem = ({ label, value, icon: Icon, color }: any) => (
+  <div className="space-y-1">
+    <div className="flex items-center gap-1.5 text-[#3A3A3A]">
+      <Icon size={12} />
+      <span className="text-[10px] uppercase tracking-widest font-black">{label}</span>
+    </div>
+    <div className={cn("text-sm font-black tracking-tighter", color)}>{value}</div>
+  </div>
+);
+
+const ActivityIcon = ({ size, className }: any) => (
+  <svg 
+    width={size} 
+    height={size} 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round" 
+    className={className}
+  >
+    <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+  </svg>
+);
+
 export const TransactionDetail: React.FC<TransactionDetailProps> = ({
   transaction,
   allTags,
@@ -26,26 +53,16 @@ export const TransactionDetail: React.FC<TransactionDetailProps> = ({
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
   const getScoreColor = (score: number) => {
-    if (score >= 90) return "text-emerald-500";
+    if (score >= 90) return "text-[#22C55E]";
     if (score >= 70) return "text-yellow-500";
-    if (score >= 50) return "text-orange-500";
-    return "text-red-500";
+    if (score >= 50) return "text-[#EF4444]";
+    return "text-[#EF4444]";
   };
-
-  const InfoItem = ({ label, value, icon: Icon, color }: any) => (
-    <div className="space-y-1">
-      <div className="flex items-center gap-1.5 text-neutral-500">
-        <Icon size={12} />
-        <span className="text-[10px] uppercase tracking-widest font-medium">{label}</span>
-      </div>
-      <div className={cn("text-sm font-medium", color)}>{value}</div>
-    </div>
-  );
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       <div className="flex items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={onClose} className="text-neutral-400 hover:text-white gap-2">
+        <Button variant="ghost" size="sm" onClick={onClose} className="text-[#A0A0A0] hover:text-white gap-2">
           <ArrowLeft size={16} /> 返回列表
         </Button>
         <div className="flex gap-2">
@@ -53,31 +70,31 @@ export const TransactionDetail: React.FC<TransactionDetailProps> = ({
             variant="outline" 
             size="sm" 
             onClick={() => onDelete(transaction.id)} 
-            className="border-red-900/50 text-red-500 hover:bg-red-500/10"
+            className="border-[#EF4444]/30 text-[#EF4444] hover:bg-[#EF4444]/10"
           >
             <Trash2 size={16} className="mr-2" /> 刪除紀錄
           </Button>
-          <Button variant="outline" size="sm" onClick={() => onEdit(transaction)} className="border-neutral-800">
+          <Button variant="outline" size="sm" onClick={() => onEdit(transaction)} className="border-[#2A2A2A]">
             編輯紀錄
           </Button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="md:col-span-2 bg-card border-border">
-          <CardHeader className="border-b border-border flex flex-row items-center justify-between">
+        <Card className="md:col-span-2 bg-[#1A1A1A] border-[#2A2A2A]">
+          <CardHeader className="border-b border-[#2A2A2A] flex flex-row items-center justify-between">
             <div className="space-y-1">
-              <CardTitle className="text-2xl font-bold tracking-tight">{transaction.symbol}</CardTitle>
-              <div className="flex items-center gap-2 text-neutral-500 text-xs font-mono">
+              <CardTitle className="text-2xl font-black tracking-tighter uppercase">{transaction.symbol}</CardTitle>
+              <div className="flex items-center gap-2 text-[#A0A0A0] text-xs font-mono">
                 <Calendar size={12} />
                 {safeFormat(transaction.date, 'yyyy年MM月dd日')}
               </div>
             </div>
             <div className={cn(
-              "px-4 py-2 rounded-lg border font-mono text-lg font-bold",
-              transaction.result === 'Profit' ? 'text-green-500 border-green-500/20 bg-green-500/5' :
-              transaction.result === 'Loss' ? 'text-red-500 border-red-500/20 bg-red-500/5' :
-              'text-neutral-400 border-neutral-800 bg-neutral-900'
+              "px-4 py-2 rounded-lg border font-mono text-lg font-black tracking-tighter",
+              transaction.result === 'Profit' ? 'text-[#22C55E] border-[#22C55E]/20 bg-[#22C55E]/5' :
+              transaction.result === 'Loss' ? 'text-[#EF4444] border-[#EF4444]/20 bg-[#EF4444]/5' :
+              'text-[#A0A0A0] border-[#2A2A2A] bg-black'
             )}>
               {transaction.result === 'Profit' ? '+' : transaction.result === 'Loss' ? '-' : ''}
               {Math.abs(transaction.uValue).toLocaleString()} u
@@ -89,7 +106,7 @@ export const TransactionDetail: React.FC<TransactionDetailProps> = ({
                 label="方向" 
                 value={transaction.side === 'Long' ? '多 (LONG)' : '空 (SHORT)'} 
                 icon={transaction.side === 'Long' ? TrendingUp : TrendingDown}
-                color={transaction.side === 'Long' ? 'text-blue-400' : 'text-orange-400'}
+                color={transaction.side === 'Long' ? 'text-[#22C55E]' : 'text-[#EF4444]'}
               />
               <InfoItem 
                 label="評分" 
@@ -97,12 +114,12 @@ export const TransactionDetail: React.FC<TransactionDetailProps> = ({
                 icon={Star}
                 color="text-white"
               />
-              <InfoItem 
-                label="狀態" 
-                value={transaction.result === 'Profit' ? '盈利' : transaction.result === 'Loss' ? '虧損' : '進行中'} 
-                icon={Activity}
-                color={transaction.result === 'Profit' ? 'text-green-500' : transaction.result === 'Loss' ? 'text-red-500' : 'text-neutral-400'}
-              />
+                <InfoItem 
+                  label="狀態" 
+                  value={transaction.result === 'Profit' ? '盈利' : transaction.result === 'Loss' ? '虧損' : '進行中'} 
+                  icon={ActivityIcon}
+                  color={transaction.result === 'Profit' ? 'text-[#22C55E]' : transaction.result === 'Loss' ? 'text-[#EF4444]' : 'text-[#A0A0A0]'}
+                />
               <InfoItem 
                 label="數值" 
                 value={`${transaction.uValue} u`} 
@@ -113,7 +130,7 @@ export const TransactionDetail: React.FC<TransactionDetailProps> = ({
 
             <div className="space-y-6">
               {transaction.checklistScore !== undefined && transaction.checklistSnapshot && transaction.checklistSnapshot.length > 0 && (
-                <section className="space-y-4 p-4 rounded-xl bg-primary/5 border border-primary/10">
+                <section className="space-y-4 p-4 rounded-xl bg-primary/10 border border-[#2A2A2A]">
                   <div className="flex items-center justify-between">
                     <h3 className="text-[10px] uppercase tracking-[0.2em] text-primary font-extrabold flex items-center gap-2">
                       <ShieldCheck size={14} /> 出手前紀律核對
@@ -241,19 +258,3 @@ export const TransactionDetail: React.FC<TransactionDetailProps> = ({
     </div>
   );
 };
-
-const Activity = ({ size, className }: any) => (
-  <svg 
-    width={size} 
-    height={size} 
-    viewBox="0 0 24 24" 
-    fill="none" 
-    stroke="currentColor" 
-    strokeWidth="2" 
-    strokeLinecap="round" 
-    strokeLinejoin="round" 
-    className={className}
-  >
-    <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-  </svg>
-);

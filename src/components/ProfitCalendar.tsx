@@ -45,8 +45,8 @@ export const ProfitCalendar: React.FC<ProfitCalendarProps> = React.memo(({ trans
             }
           }}
           modifiersClassNames={{
-            profit: "bg-green-500/20 text-green-500 font-bold rounded-md",
-            loss: "bg-red-500/20 text-red-500 font-bold rounded-md"
+            profit: "bg-[#22C55E]/20 text-[#22C55E] font-bold rounded-md",
+            loss: "bg-[#EF4444]/20 text-[#EF4444] font-bold rounded-md"
           }}
           components={{
             DayButton: ({ day, modifiers, ...props }: any) => {
@@ -59,17 +59,17 @@ export const ProfitCalendar: React.FC<ProfitCalendarProps> = React.memo(({ trans
                     {...props}
                     className={cn(
                       "w-10 h-10 rounded-md text-xs transition-colors flex flex-col items-center justify-between py-1 relative",
-                      modifiers.profit && "bg-green-500/10 text-green-600 dark:text-green-400 font-bold border border-green-500/40",
-                      modifiers.loss && "bg-red-500/10 text-red-600 dark:text-red-400 font-bold border border-red-500/40",
-                      !modifiers.profit && !modifiers.loss && "hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                      modifiers.profit && "bg-[#22C55E]/10 text-[#22C55E] font-bold border border-[#22C55E]/40",
+                      modifiers.loss && "bg-[#EF4444]/10 text-[#EF4444] font-bold border border-[#EF4444]/40",
+                      !modifiers.profit && !modifiers.loss && "hover:bg-[#2A2A2A]"
                     )}
                   >
                     <span className="text-[10px] opacity-50 self-start px-1">{day.date.getDate()}</span>
                     <div className="flex-1 flex items-center justify-center w-full">
                       {profit !== undefined && (
                         <span className={cn(
-                          "text-[9px] font-mono leading-none",
-                          profit > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+                          "text-[9px] font-mono leading-none font-bold",
+                          profit > 0 ? "text-[#22C55E]" : "text-[#EF4444]"
                         )}>
                           {profit > 0 ? '+' : ''}{Math.round(profit)}
                         </span>
@@ -82,12 +82,12 @@ export const ProfitCalendar: React.FC<ProfitCalendarProps> = React.memo(({ trans
           }}
         />
       </CardContent>
-      <div className="px-6 pb-4 flex gap-4 text-[10px] uppercase tracking-widest text-neutral-500">
+      <div className="px-6 pb-4 flex gap-4 text-[10px] uppercase tracking-widest text-[#A0A0A0]">
         <div className="flex items-center gap-1.5">
-          <div className="w-2 h-2 rounded-full bg-green-500/30" /> 盈利日
+          <div className="w-2 h-2 rounded-full bg-[#22C55E]/30" /> 盈利日
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-2 h-2 rounded-full bg-red-500/30" /> 虧損日
+          <div className="w-2 h-2 rounded-full bg-[#EF4444]/30" /> 虧損日
         </div>
       </div>
     </Card>

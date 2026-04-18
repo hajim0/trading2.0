@@ -15,7 +15,7 @@ interface TagInputProps {
   canAddTag?: boolean;
 }
 
-export const TagInput: React.FC<TagInputProps> = ({
+export const TagInput: React.FC<TagInputProps> = React.memo(({
   selectedTagIds,
   allTags,
   onAddTag,
@@ -184,4 +184,4 @@ export const TagInput: React.FC<TagInputProps> = ({
       )}
     </div>
   );
-};
+});

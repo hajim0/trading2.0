@@ -10,6 +10,7 @@ export interface UserProfile {
   displayName: string;
   photoURL: string;
   plan: Plan;
+  role: 'user' | 'admin';
   disciplineMode: DisciplineMode;
   initialCapital: number;
   createdAt: string;

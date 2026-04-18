@@ -52,7 +52,7 @@ export const EquityChart: React.FC<EquityChartProps> = React.memo(({ transaction
   const { data, off } = chartData;
 
   return (
-    <div className="w-full h-[300px] bg-neutral-950/50 rounded-xl border border-neutral-800 p-4">
+    <div className="w-full h-[300px] bg-[#0B0B0B] rounded-xl border border-[#2A2A2A] p-4">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
           <defs>
@@ -61,17 +61,17 @@ export const EquityChart: React.FC<EquityChartProps> = React.memo(({ transaction
               <stop offset={off} stopColor="#EF4444" stopOpacity={1} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#262626" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="#1A1A1A" vertical={false} />
           <XAxis 
             dataKey="displayDate" 
-            stroke="#525252" 
+            stroke="#3A3A3A" 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
             dy={10}
           />
           <YAxis 
-            stroke="#525252" 
+            stroke="#3A3A3A" 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
@@ -79,16 +79,16 @@ export const EquityChart: React.FC<EquityChartProps> = React.memo(({ transaction
           />
           <Tooltip
             contentStyle={{ 
-              backgroundColor: '#0a0a0a', 
-              border: '1px solid #262626',
+              backgroundColor: '#1A1A1A', 
+              border: '1px solid #2A2A2A',
               borderRadius: '8px',
               fontSize: '12px',
               color: '#fff'
             }}
             itemStyle={{ color: '#fff' }}
-            cursor={{ stroke: '#404040', strokeWidth: 1 }}
+            cursor={{ stroke: '#2A2A2A', strokeWidth: 1 }}
           />
-          <ReferenceLine y={0} stroke="#404040" strokeWidth={1} />
+          <ReferenceLine y={0} stroke="#2A2A2A" strokeWidth={1} />
           <Line
             type="monotone"
             dataKey="uValue"
