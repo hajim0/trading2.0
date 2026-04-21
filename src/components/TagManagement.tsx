@@ -67,7 +67,8 @@ export const TagManagement: React.FC<TagManagementProps> = ({
           <Input
             placeholder="輸入新標籤名稱..."
             value={newTagName}
-            onChange={(e) => setNewTagName(e.target.value)}
+            maxLength={10}
+            onChange={(e) => setNewTagName(e.target.value.slice(0, 10))}
             className="w-full md:w-64 bg-white text-black border-neutral-200"
             onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
           />
@@ -102,7 +103,8 @@ export const TagManagement: React.FC<TagManagementProps> = ({
                     <div className="flex items-center gap-2 flex-1 max-w-md">
                       <Input
                         value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
+                        maxLength={10}
+                        onChange={(e) => setEditName(e.target.value.slice(0, 10))}
                         className="h-8 bg-white text-black"
                         autoFocus
                         onKeyDown={(e) => {

@@ -2,8 +2,10 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Tag } from '../types';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { X, Search, Plus, Tag as TagIcon } from 'lucide-react';
+import { X, Search, Plus, Tag as TagIcon, Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ENABLE_PREMIUM_BETA } from '../lib/permissions';
+import { logger } from '../lib/logger';
 
 interface TagInputProps {
   selectedTagIds: string[];
@@ -91,7 +93,7 @@ export const TagInput: React.FC<TagInputProps> = React.memo(({
 
   return (
     <div className="relative w-full" ref={containerRef}>
-      <div className="flex flex-wrap gap-2 p-2 min-h-[42px] bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg focus-within:ring-2 focus-within:ring-neutral-400 transition-all">
+      <div className="flex flex-wrap gap-2 p-2 min-h-[42px] max-h-[160px] overflow-y-auto bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg focus-within:ring-2 focus-within:ring-neutral-400 transition-all" style={{ WebkitOverflowScrolling: 'touch' }}>
         {selectedTags.map(tag => (
           <span 
             key={tag.id} 
@@ -110,8 +112,10 @@ export const TagInput: React.FC<TagInputProps> = React.memo(({
         ))}
         <input
           value={input}
+          maxLength={10}
           onChange={(e) => {
-            setInput(e.target.value);
+            const val = e.target.value.slice(0, 10);
+            setInput(val);
             setIsOpen(true);
             setActiveIndex(0);
           }}
@@ -124,62 +128,65 @@ export const TagInput: React.FC<TagInputProps> = React.memo(({
 
       {isOpen && (input.trim() || suggestions.length > 0) && (
         <div className="absolute z-50 w-full mt-1 bg-card border border-border rounded-lg shadow-xl overflow-hidden animate-in fade-in zoom-in duration-150">
-          <ScrollArea className={cn("max-h-[200px]", suggestions.length === 0 && "h-auto")}>
-            <div className="p-1">
-              {suggestions.map((tag, index) => (
-                <button
-                  key={tag.id}
-                  type="button"
-                  onClick={() => {
-                    onSelectTag(tag.id);
-                    setInput('');
-                    setIsOpen(false);
-                  }}
-                  className={cn(
-                    "w-full text-left px-3 py-2 text-sm rounded-md flex items-center justify-between transition-colors",
-                    index === activeIndex ? "bg-neutral-100 dark:bg-neutral-800" : "hover:bg-neutral-50 dark:hover:bg-neutral-900"
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    <TagIcon size={12} className="text-neutral-400" />
-                    <span>{tag.name}</span>
-                  </div>
-                  <span className="text-[10px] text-neutral-500 uppercase">選擇</span>
-                </button>
-              ))}
-              
-              {input.trim() && !exactMatch && (
-                <button
-                  type="button"
-                  disabled={!canAddTag}
-                  onClick={() => {
-                    if (canAddTag) {
-                      onAddTag(input.trim());
+          <div className="flex flex-col max-h-[320px]">
+            {/* Search result count or mode indicator if needed */}
+            <ScrollArea className="flex-1 overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+              <div className="p-1 pr-3">
+                {suggestions.map((tag, index) => (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    onClick={() => {
+                      onSelectTag(tag.id);
                       setInput('');
                       setIsOpen(false);
-                    }
-                  }}
-                  className={cn(
-                    "w-full text-left px-3 py-2 text-sm rounded-md flex items-center justify-between transition-colors",
-                    !canAddTag ? "opacity-50 cursor-not-allowed" : "text-blue-500",
-                    suggestions.length === 0 ? "bg-neutral-100 dark:bg-neutral-800" : "hover:bg-neutral-50 dark:hover:bg-neutral-900"
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    <Plus size={14} />
-                    <span>新增標籤 "{input.trim()}"</span>
-                  </div>
-                  {!canAddTag && <Lock size={12} className="text-neutral-500" />}
-                </button>
-              )}
+                    }}
+                    className={cn(
+                      "w-full text-left px-3 py-2 text-sm rounded-md flex items-center justify-between transition-colors",
+                      index === activeIndex ? "bg-neutral-100 dark:bg-neutral-800" : "hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <TagIcon size={12} className="text-neutral-400" />
+                      <span>{tag.name}</span>
+                    </div>
+                    <span className="text-[10px] text-neutral-500 uppercase">點擊選擇</span>
+                  </button>
+                ))}
+                
+                {input.trim() && !exactMatch && (
+                  <button
+                    type="button"
+                    disabled={!canAddTag}
+                    onClick={() => {
+                      if (canAddTag) {
+                        onAddTag(input.trim());
+                        setInput('');
+                        setIsOpen(false);
+                      }
+                    }}
+                    className={cn(
+                      "w-full text-left px-3 py-2 text-sm rounded-md flex items-center justify-between transition-colors sticky bottom-0 bg-card border-t border-border",
+                      !canAddTag && !ENABLE_PREMIUM_BETA ? "opacity-50 cursor-not-allowed" : "text-blue-500",
+                      suggestions.length === 0 ? "bg-neutral-100 dark:bg-neutral-800" : "hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Plus size={14} />
+                      <span className="font-bold">建立新標籤 "{input.trim()}"</span>
+                    </div>
+                    {!canAddTag && !ENABLE_PREMIUM_BETA && <Lock size={12} className="text-neutral-500" />}
+                  </button>
+                )}
 
-              {input.trim() && suggestions.length === 0 && !exactMatch && (
-                <div className="px-3 py-4 text-center text-xs text-neutral-500 italic">
-                  {canAddTag ? "按 Enter 建立新標籤" : "升級 Pro 以建立新標籤"}
-                </div>
-              )}
-            </div>
-          </ScrollArea>
+                {input.trim() && suggestions.length === 0 && !exactMatch && (
+                  <div className="px-3 py-4 text-center text-xs text-neutral-500 italic">
+                    {canAddTag ? "按 Enter 建立新標籤" : "請從現有標籤中選擇"}
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          </div>
         </div>
       )}
     </div>

@@ -11,8 +11,41 @@ import firebaseConfig from '../firebase-applet-config.json';
  * 啟用離線持久化與多頁籤同步，優化跨裝置體驗。
  */
 import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
+import { logger } from './lib/logger';
 
 const app = initializeApp(firebaseConfig);
+
+/**
+ * 初始化 App Check (生產環境建議啟用)
+ */
+export function initFirebaseAppCheck() {
+  if (typeof window === 'undefined') return;
+
+  const siteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY;
+  const isProd = import.meta.env.PROD;
+
+  if (siteKey) {
+    try {
+      initializeAppCheck(app, {
+        provider: new ReCaptchaV3Provider(siteKey),
+        isTokenAutoRefreshEnabled: true
+      });
+      logger.log('[Firebase] App Check initialized successfully.');
+    } catch (err) {
+      logger.warn('[Firebase] App Check initialization failed:', err);
+    }
+  } else {
+    const msg = '[Firebase] App Check skipped: VITE_FIREBASE_APP_CHECK_SITE_KEY not found.';
+    if (isProd) {
+      console.warn(`${msg} CRITICAL: Production environment should enable App Check to prevent abuse.`);
+    } else {
+      logger.log(msg);
+    }
+  }
+}
+
+// Call initialization
+initFirebaseAppCheck();
 
 export const auth = getAuth(app);
 
@@ -57,24 +90,37 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
+  const isDev = import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEBUG_LOGS === 'true';
+  
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  
+  // Extract minimal info for production
+  const sanitizedInfo = {
+    error: errorMessage.replace(/\[.*?\]/g, ''), // Strip Firebase internal codes if needed or keep them but hide PII
     operationType,
-    path
+    path: isDev ? path : 'restricted',
+    userId: auth.currentUser?.uid ? 'authenticated' : 'anonymous'
+  };
+
+  if (isDev) {
+    console.error('[Firestore Error Details]', {
+      error,
+      operationType,
+      path,
+      userId: auth.currentUser?.uid,
+      errorCode: (error as any)?.code
+    });
+  } else {
+    console.error('[Firestore Error]', sanitizedInfo);
   }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+
+  // Provide a user-friendly message
+  let userMessage = '資料庫操作失敗，請稍後再試。';
+  if (errorMessage.includes('permission-denied')) {
+    userMessage = '您沒有權限執行此操作。';
+  } else if (errorMessage.includes('not-found')) {
+    userMessage = '找不到指定的資料。';
+  }
+
+  throw new Error(userMessage);
 }

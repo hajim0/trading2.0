@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import { Transaction } from '../types';
 import { cn, safeFormat, parseLocalDate } from '@/lib/utils';
+import { logger } from '../lib/logger';
 
 interface EquityChartProps {
   transactions: Transaction[];
@@ -18,7 +19,7 @@ interface EquityChartProps {
 
 export const EquityChart: React.FC<EquityChartProps> = React.memo(({ transactions }) => {
   const chartData = useMemo(() => {
-    console.log('[Perf] chart data recalculated');
+    logger.log('[Perf] chart data recalculated');
     if (transactions.length === 0) return { data: [], off: 0 };
     
     // Sort by date ascending for the chart
@@ -28,7 +29,7 @@ export const EquityChart: React.FC<EquityChartProps> = React.memo(({ transaction
 
     let cumulativeU = 0;
     const data = sorted.map((t) => {
-      const val = t.result === 'Loss' ? -Math.abs(t.uValue) : Math.abs(t.uValue);
+      const val = t.uValue || 0;
       cumulativeU += val;
       return {
         date: t.date,

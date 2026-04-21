@@ -3,7 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { TradeStats } from '../types';
 import { TrendingUp, TrendingDown, Activity, Target, ShieldAlert, Flame, Scale } from 'lucide-react';
 import { COLORS } from '../constants';
-import { cn } from '@/lib/utils';
+import { cn, formatCurrency, getPnLColor, getWinRateColor } from '@/lib/utils';
 
 interface StatsOverviewProps {
   stats: TradeStats;
@@ -14,17 +14,17 @@ export const StatsOverview: React.FC<StatsOverviewProps> = React.memo(({ stats }
     return [
       {
         label: '累積盈虧',
-        num: `${stats.totalU > 0 ? '+' : ''}${stats.totalU.toLocaleString()}`,
+        num: formatCurrency(stats.totalU).replace(' u', ''),
         unit: 'u',
         icon: Activity,
-        color: stats.totalU >= 0 ? 'text-[#22C55E]' : 'text-[#EF4444]',
+        color: getPnLColor(stats.totalU),
       },
       {
         label: '勝率',
         num: (stats.winRate * 100).toFixed(1),
         unit: '%',
         icon: Target,
-        color: 'text-white',
+        color: getWinRateColor(stats.winRate * 100),
       },
       {
         label: '盈虧比',
@@ -45,7 +45,7 @@ export const StatsOverview: React.FC<StatsOverviewProps> = React.memo(({ stats }
         num: stats.currentStreak.toString(),
         unit: '次',
         icon: stats.currentStreakType === 'Loss' ? TrendingDown : Flame,
-        color: stats.currentStreakType === 'Loss' ? 'text-[#22C55E]' : 'text-[#EF4444]',
+        color: stats.currentStreakType === 'Loss' ? 'text-[#EF4444]' : stats.currentStreakType === 'Profit' ? 'text-[#22C55E]' : 'text-white',
       },
     ];
   }, [stats]);

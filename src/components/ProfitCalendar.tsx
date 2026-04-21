@@ -3,6 +3,7 @@ import { Transaction } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar } from '@/components/ui/calendar';
 import { cn, getLocalDateString } from '@/lib/utils';
+import { logger } from '../lib/logger';
 
 interface ProfitCalendarProps {
   transactions: Transaction[];
@@ -11,13 +12,13 @@ interface ProfitCalendarProps {
 export const ProfitCalendar: React.FC<ProfitCalendarProps> = React.memo(({ transactions }) => {
   // Group transactions by date and calculate daily profit/loss
   const dailyStats = useMemo(() => {
-    console.log('[Perf] daily stats recalculated for calendar');
+    logger.log('[Perf] daily stats recalculated for calendar');
     return transactions.reduce((acc, t) => {
       const dateStr = t.date.split('T')[0];
       if (!acc[dateStr]) {
         acc[dateStr] = 0;
       }
-      const val = t.result === 'Loss' ? -Math.abs(t.uValue) : Math.abs(t.uValue);
+      const val = t.uValue || 0;
       acc[dateStr] += val;
       return acc;
     }, {} as Record<string, number>);

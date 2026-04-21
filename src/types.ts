@@ -1,8 +1,14 @@
 export type Side = 'Long' | 'Short';
 export type Result = 'Profit' | 'Loss' | 'Open';
-export type Rating = 'A' | 'B' | 'C';
+export type Rating = 'S' | 'A' | 'B' | 'C';
 export type Plan = 'free' | 'pro';
 export type DisciplineMode = 'relaxed' | 'semi' | 'strict';
+
+export interface DisciplineGrades {
+  S: number; // min score for S, e.g. 90
+  A: number; // min score for A, e.g. 80
+  B: number; // min score for B, e.g. 70
+}
 
 export interface UserProfile {
   uid: string;
@@ -12,6 +18,7 @@ export interface UserProfile {
   plan: Plan;
   role: 'user' | 'admin';
   disciplineMode: DisciplineMode;
+  disciplineGrades?: DisciplineGrades;
   initialCapital: number;
   createdAt: string;
   updatedAt: string;

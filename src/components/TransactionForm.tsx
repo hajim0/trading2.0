@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Transaction, Side, Result, Rating, Tag, StrategyTemplate, StrategyChecklistItem, ChecklistSnapshotItem, DisciplineMode } from '../types';
+import { Transaction, Side, Result, Rating, Tag, StrategyTemplate, StrategyChecklistItem, ChecklistSnapshotItem, DisciplineMode, DisciplineGrades } from '../types';
 import { TagInput } from './TagInput';
 import { Input } from '@/components/ui/input';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -19,6 +19,7 @@ import {
   AlertCircle, ShieldCheck, ListChecks, ChevronDown, 
   ChevronUp, Check, Zap, BarChart2, ShieldAlert, Lock, Lock as LockIcon 
 } from 'lucide-react';
+import { logger } from '../lib/logger';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -29,8 +30,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { cn, safeFormat, getLocalDateString, parseLocalDate } from '@/lib/utils';
+import { cn, safeFormat, getLocalDateString, parseLocalDate, calculateGrade } from '@/lib/utils';
 import { toast } from 'sonner';
+import { auth, storage } from '../firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { Loader2 } from 'lucide-react';
 
 interface TransactionFormProps {
   onSubmit: (data: Partial<Transaction>) => Promise<void>;
@@ -42,6 +46,8 @@ interface TransactionFormProps {
   strategies?: StrategyTemplate[];
   checklistItems?: StrategyChecklistItem[];
   disciplineMode?: DisciplineMode;
+  disciplineGrades?: DisciplineGrades;
+  globalStrategyOnly?: boolean;
 }
 
 export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
@@ -54,8 +60,11 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
   strategies = [],
   checklistItems = [],
   disciplineMode = 'semi',
+  disciplineGrades = { S: 90, A: 80, B: 70 },
+  globalStrategyOnly = false,
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const defaultData: Partial<Transaction> = {
@@ -80,6 +89,23 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
   const [formData, setFormData] = useState<Partial<Transaction>>({
     ...defaultData,
     ...initialData
+  });
+
+  const [isLossMode, setIsLossMode] = useState<boolean>(() => {
+    if (initialData?.uValue && initialData.uValue < 0) return true;
+    if (initialData?.result === 'Loss') return true;
+    return false;
+  });
+
+  const [rawUValue, setRawUValue] = useState<string>(() => {
+    if (initialData?.uValue !== undefined) {
+      return Math.abs(initialData.uValue).toString();
+    }
+    return '0';
+  });
+
+  const [calculatedRating, setCalculatedRating] = useState<Rating>(() => {
+    return calculateGrade(initialData?.checklistScore || 0, disciplineGrades);
   });
 
   // Local state for text fields to prevent typing lag
@@ -132,6 +158,18 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
     return { score, passed: allRequiredChecked, missing };
   }, [currentStrategyItems, checkedItemIds]);
 
+  // Auto-select strategy if global mode is on
+  React.useEffect(() => {
+    if (globalStrategyOnly && strategies.length > 0 && !formData.strategyId) {
+      setFormData(prev => ({ ...prev, strategyId: strategies[0].id }));
+    }
+  }, [globalStrategyOnly, strategies, formData.strategyId]);
+
+  // Sync calculated rating whenever score or grades change
+  React.useEffect(() => {
+    setCalculatedRating(calculateGrade(metrics.score, disciplineGrades));
+  }, [metrics.score, disciplineGrades]);
+
   const handleToggleCheck = (itemId: string) => {
     setCheckedItemIds(prev => {
       const next = new Set(prev);
@@ -182,25 +220,73 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
     }));
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files) return;
+    if (!files || !auth.currentUser) return;
 
-    Array.from(files).forEach((file: File) => {
-      // Basic size check (e.g., 2MB)
-      if (file.size > 2 * 1024 * 1024) {
-        toast.warning(`圖片 ${file.name} 超過 2MB，可能會導致儲存變慢`);
+    const currentCount = formData.screenshots?.length || 0;
+    const remainingSlots = 5 - currentCount;
+
+    if (remainingSlots <= 0) {
+      toast.warning("已達圖片數量上限 (5張)");
+      return;
+    }
+
+    const validFiles: File[] = [];
+    const filesArray = Array.from(files);
+
+    for (const file of filesArray as File[]) {
+      if (validFiles.length >= remainingSlots) break;
+
+      // 1. Validate File Type
+      if (!file.type.startsWith('image/')) {
+        toast.error(`檔案 ${file.name} 並非圖片格式`);
+        continue;
       }
 
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setFormData((prev) => ({
-          ...prev,
-          screenshots: [...(prev.screenshots || []), reader.result as string],
-        }));
-      };
-      reader.readAsDataURL(file);
-    });
+      // 2. Validate File Size (5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error(`圖片 ${file.name} 超過 5MB 上限`);
+        continue;
+      }
+
+      validFiles.push(file);
+    }
+
+    if (validFiles.length === 0) return;
+
+    if (filesArray.length > remainingSlots) {
+      toast.warning(`剩餘空間僅供上傳 ${remainingSlots} 張圖片`);
+    }
+
+    setIsUploading(true);
+    const uploadToastId = toast.loading("正在上傳圖片...");
+
+    try {
+      const uploadPromises = validFiles.map(async (file: File) => {
+        const screenshotId = crypto.randomUUID();
+        const fileExt = file.name.split('.').pop() || 'jpg';
+        const storagePath = `users/${auth.currentUser?.uid}/screenshots/${screenshotId}.${fileExt}`;
+        const storageRef = ref(storage, storagePath);
+        
+        await uploadBytes(storageRef, file);
+        return getDownloadURL(storageRef);
+      });
+
+      const urls = await Promise.all(uploadPromises);
+      
+      setFormData((prev) => ({
+        ...prev,
+        screenshots: [...(prev.screenshots || []), ...urls],
+      }));
+      
+      toast.success("圖片上傳成功", { id: uploadToastId });
+    } catch (err: any) {
+      console.error("[Upload] failed", err);
+      toast.error(err.message || "上傳失敗，請稍後再試", { id: uploadToastId });
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const removeImage = (index: number) => {
@@ -242,6 +328,10 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
     const toastId = toast.loading(initialData ? "正在更新交易..." : "正在儲存交易...");
 
     try {
+      // Finalize uValue based on mode
+      const numericU = parseFloat(rawUValue) || 0;
+      const finalSignedU = isLossMode ? -Math.abs(numericU) : Math.abs(numericU);
+
       // Prepare Snapshot
       const snapshot: ChecklistSnapshotItem[] = currentStrategyItems.map(item => ({
         itemId: item.id,
@@ -258,6 +348,8 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
         entryReason: localEntryReason,
         stopLossReason: localStopLossReason,
         review: localReview,
+        uValue: finalSignedU,
+        rating: calculatedRating,
         checklistScore: metrics.score,
         passedRequiredCheck: metrics.passed,
         missingRequiredItems: metrics.missing,
@@ -300,25 +392,32 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
           <div className="space-y-4 p-4 rounded-xl bg-black border border-[#2A2A2A]">
             <div className="space-y-2">
               <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-[0.2em] font-black flex items-center gap-2">
-                <ShieldCheck size={14} /> 核心紀律規範 (Rule Template)
+                <ShieldCheck size={14} /> {globalStrategyOnly ? "紀律規範核對 (Global Rule)" : "核心紀律規範 (Rule Template)"}
               </Label>
-              <Select
-                value={formData.strategyId || ''}
-                onValueChange={(value) => {
-                  setFormData({ ...formData, strategyId: value });
-                  setCheckedItemIds(new Set()); // Reset checks when switching strategy
-                }}
-              >
-                <SelectTrigger className="bg-black text-white border-[#2A2A2A] focus:ring-0 focus:ring-offset-0 h-11 font-bold">
-                  <SelectValue placeholder="選擇適用的紀律規範模板..." />
-                </SelectTrigger>
-                <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A]">
-                  <SelectItem value="">不使用規範模板 (自由交易)</SelectItem>
-                  {strategies.map(s => (
-                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {!globalStrategyOnly ? (
+                <Select
+                  value={formData.strategyId || ''}
+                  onValueChange={(value) => {
+                    setFormData({ ...formData, strategyId: value });
+                    setCheckedItemIds(new Set()); // Reset checks when switching strategy
+                  }}
+                >
+                  <SelectTrigger className="bg-black text-white border-[#2A2A2A] focus:ring-0 focus:ring-offset-0 h-11 font-bold">
+                    <SelectValue placeholder="選擇適用的紀律規範模板..." />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A]">
+                    <SelectItem value="">不使用規範模板 (自由交易)</SelectItem>
+                    {strategies.map(s => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <div className="h-11 flex items-center px-4 rounded-md border border-[#2A2A2A] bg-neutral-900/50 text-xs font-bold text-neutral-400">
+                  <Lock size={12} className="mr-2 opacity-50" />
+                  套用全域規範：{strategies[0]?.name || '載入中...'}
+                </div>
+              )}
             </div>
 
             <AnimatePresence>
@@ -411,9 +510,9 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
                 <Input
                   placeholder="BTC, ETH, XAU..."
                   value={localSymbol}
-                  maxLength={100}
+                  maxLength={10}
                   onChange={(e) => {
-                    const val = e.target.value.toUpperCase();
+                    const val = e.target.value.toUpperCase().slice(0, 10);
                     setLocalSymbol(val);
                     if (errors.symbol) setErrors(prev => ({ ...prev, symbol: '' }));
                   }}
@@ -424,7 +523,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
                   )}
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#3A3A3A] font-mono">
-                  {localSymbol.length}/100
+                  {localSymbol.length}/10
                 </span>
               </div>
             </div>
@@ -482,7 +581,11 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
               <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">盈虧結果</Label>
               <Select
                 value={formData.result || 'Open'}
-                onValueChange={(value: Result) => setFormData({ ...formData, result: value })}
+                onValueChange={(value: Result) => {
+                  setFormData({ ...formData, result: value });
+                  if (value === 'Profit') setIsLossMode(false);
+                  if (value === 'Loss') setIsLossMode(true);
+                }}
               >
                 <SelectTrigger className="bg-black text-white border-[#2A2A2A] focus:ring-0 h-11 font-bold">
                   <SelectValue />
@@ -496,31 +599,83 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
             </div>
 
             <div className="space-y-2">
-              <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">執行評分</Label>
-              <Select
-                value={formData.rating || 'B'}
-                onValueChange={(value: Rating) => setFormData({ ...formData, rating: value })}
-              >
-                <SelectTrigger className="bg-black text-white border-[#2A2A2A] focus:ring-0 h-11 font-bold">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A]">
-                  <SelectItem value="A">Grade A (完美執行)</SelectItem>
-                  <SelectItem value="B">Grade B (符合計畫)</SelectItem>
-                  <SelectItem value="C">Grade C (情緒交易)</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">執行評分 (Auto)</Label>
+              <div className={cn(
+                "h-11 flex items-center px-4 rounded-md border font-black tabular-nums transition-all border-[#2A2A2A] bg-black/60",
+                calculatedRating === 'S' ? "text-[#22C55E] border-[#22C55E]/20" :
+                calculatedRating === 'A' ? "text-[#3B82F6] border-[#3B82F6]/20" :
+                calculatedRating === 'B' ? "text-[#EAB308] border-[#EAB308]/20" :
+                "text-[#EF4444] border-[#EF4444]/20"
+              )}>
+                {calculatedRating ? `Grade ${calculatedRating}` : '--'}
+              </div>
+              <p className="text-[9px] text-neutral-500 italic">由紀律分數 ({metrics.score}%) 自動計算得出</p>
             </div>
 
             <div className="space-y-2">
               <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">u 盈虧金額</Label>
-              <Input
-                type="number"
-                placeholder="0"
-                value={formData.uValue}
-                onChange={(e) => setFormData({ ...formData, uValue: parseFloat(e.target.value) || 0 })}
-                className="bg-black text-white border-[#2A2A2A] font-mono focus:ring-0 placeholder:text-[#3A3A3A] h-11 font-black"
-              />
+              <div className="flex gap-2">
+                <div className="flex bg-black border border-[#2A2A2A] rounded-md p-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsLossMode(false);
+                      setFormData(prev => ({ ...prev, result: 'Profit' }));
+                    }}
+                    className={cn(
+                      "px-3 py-1 text-[10px] font-black uppercase tracking-tighter rounded transition-all",
+                      !isLossMode ? "bg-[#22C55E] text-black" : "text-[#3A3A3A] hover:text-[#A0A0A0]"
+                    )}
+                  >
+                    Profit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsLossMode(true);
+                      setFormData(prev => ({ ...prev, result: 'Loss' }));
+                    }}
+                    className={cn(
+                      "px-3 py-1 text-[10px] font-black uppercase tracking-tighter rounded transition-all",
+                      isLossMode ? "bg-[#EF4444] text-white" : "text-[#3A3A3A] hover:text-[#A0A0A0]"
+                    )}
+                  >
+                    Loss
+                  </button>
+                </div>
+                <div className="relative flex-1">
+                  <span className={cn(
+                    "absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm font-black",
+                    isLossMode ? "text-[#EF4444]" : "text-[#22C55E]"
+                  )}>
+                    {isLossMode ? '-' : '+'}
+                  </span>
+                  <Input
+                    type="number"
+                    placeholder="0"
+                    value={rawUValue}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      // Handle direct minus/plus input if they type it
+                      if (val.startsWith('-')) {
+                        setIsLossMode(true);
+                        setFormData(prev => ({ ...prev, result: 'Loss' }));
+                        setRawUValue(val.replace('-', ''));
+                      } else if (val.startsWith('+')) {
+                        setIsLossMode(false);
+                        setFormData(prev => ({ ...prev, result: 'Profit' }));
+                        setRawUValue(val.replace('+', ''));
+                      } else {
+                        setRawUValue(val);
+                      }
+                    }}
+                    className={cn(
+                      "bg-black text-white border-[#2A2A2A] font-mono focus:ring-0 placeholder:text-[#3A3A3A] h-11 pl-7 font-black",
+                      isLossMode ? "text-[#EF4444]" : "text-[#22C55E]"
+                    )}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -550,12 +705,13 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">進場邏輯</Label>
+                  <span className="text-[9px] text-[#3A3A3A] font-mono">{localEntryReason.length}/150</span>
                 </div>
                 <Textarea
                   placeholder="為什麼要在這裡出手..."
                   value={localEntryReason}
-                  maxLength={10000}
-                  onChange={(e) => setLocalEntryReason(e.target.value)}
+                  maxLength={150}
+                  onChange={(e) => setLocalEntryReason(e.target.value.slice(0, 150))}
                   onBlur={() => handleBlurText('entryReason', localEntryReason)}
                   className="bg-black text-white border-[#2A2A2A] min-h-[100px] focus:ring-0 placeholder:text-[#3A3A3A] font-bold"
                 />
@@ -564,31 +720,40 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
           </div>
 
           <div className="space-y-2">
-            <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">止損原因</Label>
+            <div className="flex justify-between items-center">
+              <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">止損原因</Label>
+              <span className="text-[9px] text-[#3A3A3A] font-mono">{localStopLossReason.length}/150</span>
+            </div>
             <Textarea
               placeholder="止損或減倉計畫..."
               value={localStopLossReason}
-              maxLength={10000}
-              onChange={(e) => setLocalStopLossReason(e.target.value)}
+              maxLength={150}
+              onChange={(e) => setLocalStopLossReason(e.target.value.slice(0, 150))}
               onBlur={() => handleBlurText('stopLossReason', localStopLossReason)}
               className="bg-black text-white border-[#2A2A2A] min-h-[100px] focus:ring-0 placeholder:text-[#3A3A3A] font-bold"
             />
           </div>
 
           <div className="space-y-2">
-            <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">復盤</Label>
+            <div className="flex justify-between items-center">
+              <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">復盤</Label>
+              <span className="text-[9px] text-[#3A3A3A] font-mono">{localReview.length}/150</span>
+            </div>
             <Textarea
               placeholder="總結心得..."
               value={localReview}
-              maxLength={10000}
-              onChange={(e) => setLocalReview(e.target.value)}
+              maxLength={150}
+              onChange={(e) => setLocalReview(e.target.value.slice(0, 150))}
               onBlur={() => handleBlurText('review', localReview)}
               className="bg-black text-white border-[#2A2A2A] min-h-[120px] focus:ring-0 placeholder:text-[#3A3A3A] font-bold"
             />
           </div>
 
           <div className="space-y-4">
-            <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">截圖</Label>
+            <div className="flex justify-between items-center">
+              <Label className="text-[10px] text-[#A0A0A0] uppercase tracking-widest font-black">截圖</Label>
+              <span className="text-[9px] text-[#3A3A3A] font-mono">{(formData.screenshots?.length || 0)}/3</span>
+            </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {formData.screenshots?.map((src, i) => (
                 <div key={`screenshot-${i}`} className="relative group aspect-video rounded border border-[#2A2A2A] overflow-hidden">
@@ -602,11 +767,24 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
                   </button>
                 </div>
               ))}
-              <label className="aspect-video rounded border border-dashed border-[#2A2A2A] flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-black transition-colors">
-                <ImagePlus size={16} className="text-[#3A3A3A]" />
-                <span className="text-[8px] text-[#3A3A3A] uppercase font-black">Upload</span>
-                <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} />
-              </label>
+              {(formData.screenshots?.length || 0) < 5 && (
+                <label className={cn(
+                  "aspect-video rounded border border-dashed border-[#2A2A2A] flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors",
+                  isUploading ? "opacity-50 cursor-not-allowed bg-black/20" : "hover:bg-black"
+                )}>
+                  {isUploading ? (
+                    <Loader2 size={16} className="text-[#3A3A3A] animate-spin" />
+                  ) : (
+                    <ImagePlus size={16} className="text-[#3A3A3A]" />
+                  )}
+                  <span className="text-[8px] text-[#3A3A3A] uppercase font-black">
+                    {isUploading ? 'Uploading...' : 'Upload'}
+                  </span>
+                  {!isUploading && (
+                    <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} disabled={isUploading} />
+                  )}
+                </label>
+              )}
             </div>
           </div>
 
@@ -628,7 +806,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = React.memo(({
                   ? "bg-[#1A1A1A] text-[#3A3A3A] cursor-not-allowed" 
                   : "bg-white text-black hover:bg-neutral-200"
               )} 
-              disabled={isSubmitting}
+              disabled={isSubmitting || isUploading}
             >
               {isSubmitting ? 'Saving...' : (disciplineMode === 'strict' && !metrics.passed && formData.strategyId) ? 'Locked' : 'Save Record'}
             </Button>

@@ -1,14 +1,67 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import { format, isValid } from 'date-fns';
+import { DisciplineGrades, Rating } from '../src/types';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+export function calculateGrade(score: number, grades: DisciplineGrades): Rating {
+  if (score >= (grades?.S ?? 90)) return 'S';
+  if (score >= (grades?.A ?? 80)) return 'A';
+  if (score >= (grades?.B ?? 70)) return 'B';
+  return 'C';
+}
+
+export function calculateDisciplineScore(snapshot: any[]): number {
+  if (!snapshot || snapshot.length === 0) return 0;
+  // Handle items that might have been deactivated in the global config but are in the snapshot
+  // Actually, the snapshot should only contain items that were active at the time or 
+  // currently we want to recalculate based on ACTIVE items.
+  const activeItems = snapshot.filter((s: any) => s.active !== false); 
+  if (activeItems.length === 0) return 0;
+  
+  const totalWeight = activeItems.reduce((acc, curr) => acc + curr.weight, 0);
+  const checkedWeight = activeItems.reduce((acc, curr) => acc + (curr.checked ? curr.weight : 0), 0);
+  
+  return totalWeight > 0 ? Math.round((checkedWeight / totalWeight) * 100) : 0;
+}
+
+export function calculatePassedRequired(snapshot: any[]): boolean {
+  if (!snapshot || snapshot.length === 0) return true;
+  return snapshot
+    .filter((s: any) => s.active !== false && s.required)
+    .every((s: any) => s.checked);
+}
+
+export function formatPnL(value: number) {
+  if (value === 0) return '0 u';
+  const absValue = Math.abs(value);
+  const sign = value > 0 ? '+' : '-';
+  return `${sign}${absValue.toLocaleString()} u`;
+}
+
+export function getPnLColor(value: number) {
+  if (value > 0) return 'text-[#22C55E]';
+  if (value < 0) return 'text-[#EF4444]';
+  return 'text-[#A0A0A0]';
+}
+
+export function getWinRateColor(rate: number | null | undefined) {
+  if (rate === null || rate === undefined) return 'text-[#A0A0A0]';
+  if (rate >= 50) return 'text-[#22C55E]';
+  return 'text-[#EF4444]';
+}
+
+export function getDeltaColor(value: number) {
+  if (value > 0) return 'text-[#22C55E]';
+  if (value < 0) return 'text-[#EF4444]';
+  return 'text-[#A0A0A0]';
+}
+
 export function formatCurrency(value: number) {
-  const sign = value >= 0 ? '+' : '';
-  return `${sign}${value.toLocaleString()} u`;
+  return formatPnL(value);
 }
 
 /**
@@ -65,11 +118,15 @@ export function formatDate(date: string | Date) {
 export function calculateTradeStats(transactions: any[], initialCapital: number) {
   const closedTrades = transactions.filter(t => t.result !== 'Open');
   const totalTrades = closedTrades.length;
+  
+  // Based on uValue sign rather than result string for more robustness if possible, 
+  // but we should respect result for WIN rate. 
   const profitCount = closedTrades.filter(t => t.result === 'Profit').length;
   const lossCount = closedTrades.filter(t => t.result === 'Loss').length;
-  const totalU = closedTrades.reduce((acc, t) => {
-    return acc + (t.result === 'Loss' ? -Math.abs(t.uValue) : Math.abs(t.uValue));
-  }, 0);
+  
+  // Total U is now just a simple sum of signed values
+  const totalU = closedTrades.reduce((acc, t) => acc + (t.uValue || 0), 0);
+  
   const winRate = totalTrades > 0 ? profitCount / (profitCount + lossCount || 1) : 0;
 
   const sortedTx = [...closedTrades].sort((a, b) => 
@@ -89,7 +146,7 @@ export function calculateTradeStats(transactions: any[], initialCapital: number)
   let activeStreakType: 'Profit' | 'Loss' | 'None' = 'None';
 
   sortedTx.forEach(t => {
-    const val = t.result === 'Loss' ? -Math.abs(t.uValue) : Math.abs(t.uValue);
+    const val = t.uValue || 0;
     currentEquity += val;
     
     if (currentEquity > peakEquity) {
@@ -118,8 +175,8 @@ export function calculateTradeStats(transactions: any[], initialCapital: number)
     }
   });
 
-  const profitTrades = closedTrades.filter(t => t.result === 'Profit');
-  const lossTrades = closedTrades.filter(t => t.result === 'Loss');
+  const profitTrades = closedTrades.filter(t => (t.uValue || 0) > 0);
+  const lossTrades = closedTrades.filter(t => (t.uValue || 0) < 0);
   
   const avgProfit = profitTrades.length > 0 
     ? profitTrades.reduce((acc, t) => acc + Math.abs(t.uValue), 0) / profitTrades.length 

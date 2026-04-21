@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Transaction, TradeStats, Tag, UserProfile, Plan, StrategyTemplate, StrategyChecklistItem, DisciplineMode } from './types';
+import { Transaction, TradeStats, Tag, UserProfile, Plan, StrategyTemplate, StrategyChecklistItem, DisciplineMode, DisciplineGrades } from './types';
 import { auth, googleProvider, signInWithPopup, signOut, db, OperationType, handleFirestoreError } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query, orderBy, deleteDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query, orderBy, deleteDoc, serverTimestamp, Timestamp, writeBatch } from 'firebase/firestore';
 import { EquityChart } from './components/EquityChart';
 import { StatsOverview } from './components/StatsOverview';
 import { TransactionList } from './components/TransactionList';
@@ -10,16 +10,20 @@ import { TransactionForm } from './components/TransactionForm';
 import { TransactionDetail } from './components/TransactionDetail';
 import { ProfitCalendar } from './components/ProfitCalendar';
 import { TagAnalysis } from './components/TagAnalysis';
+import { DisciplineAnalysis } from './components/DisciplineAnalysis';
 import { TagManagement } from './components/TagManagement';
 import { StrategyManagement } from './components/StrategyManagement';
+import { Paywall } from './components/Paywall';
+import { getFeatureAccess, ENABLE_PREMIUM_BETA } from './lib/permissions';
 import { FloatingActionButton } from './components/FloatingActionButton';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Plus, LayoutDashboard, History, Settings, LogOut, Menu, X, Moon, Sun, BarChart2, Tags, Wifi, RefreshCw, ShieldAlert, Lock, Zap, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, calculateTradeStats } from '@/lib/utils';
+import { cn, calculateTradeStats, calculateGrade, calculateDisciplineScore, calculatePassedRequired } from '@/lib/utils';
 import { Toaster, toast } from 'sonner';
+import { logger } from './lib/logger';
 
 type View = 'dashboard' | 'list' | 'add' | 'edit' | 'detail' | 'analysis' | 'tags' | 'settings' | 'strategies';
 
@@ -58,7 +62,7 @@ const NavItem = ({ icon: Icon, label, active, locked, onClick }: any) => (
       <Icon size={19} strokeWidth={active ? 2.5 : 2} />
     </div>
     <span className="text-[13px] tracking-tight font-medium">{label}</span>
-    {locked && <Lock size={12} className="ml-auto opacity-50" />}
+    {locked && !ENABLE_PREMIUM_BETA && <Lock size={12} className="ml-auto opacity-50" />}
   </button>
 );
 
@@ -73,6 +77,8 @@ export default function App() {
   // --- App State ---
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [disciplineMode, setDisciplineMode] = useState<DisciplineMode>('semi');
+  const [disciplineGrades, setDisciplineGrades] = useState<DisciplineGrades>({ S: 90, A: 80, B: 70 });
+  const [tempGrades, setTempGrades] = useState<DisciplineGrades>({ S: 90, A: 80, B: 70 });
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [touchStart, setTouchStart] = useState<number | null>(null);
@@ -85,7 +91,7 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [initialCapital, setInitialCapital] = useState<number | null>(null);
   const [isProfileLoading, setIsProfileLoading] = useState(true);
-  const [localSettingsCapital, setLocalSettingsCapital] = useState<string>('');
+  const [localSettingsCapital, setLocalSettingsCapital] = useState<string>('10000');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('theme') as 'dark' | 'light') || 'dark';
   });
@@ -98,6 +104,11 @@ export default function App() {
   // --- Refs for cleanup ---
   const unsubscribes = React.useRef<(() => void)[]>([]);
   const itemUnsubscribes = React.useRef<Record<string, () => void>>({});
+  const prevView = React.useRef<View>('dashboard');
+
+  useEffect(() => {
+    prevView.current = currentView;
+  }, [currentView]);
 
   const cleanupListeners = () => {
     if (unsubscribes.current.length > 0) {
@@ -110,20 +121,27 @@ export default function App() {
   };
 
   const resetAppState = () => {
-    console.log('[Auth] Resetting app state for new user');
+    console.log('[Auth] Resetting app state for clean context');
     setTransactions([]);
     setTags([]);
+    setStrategies([]);
+    setChecklistItems([]);
     setUserProfile(null);
     setSelectedTransaction(null);
-    setCurrentView('dashboard');
     setInitialCapital(null);
     setIsProfileLoading(true);
+    setCurrentView('dashboard');
   };
 
   const effectiveUserId = user?.uid || null;
-  const isPro = true; 
-  const canUseTagManagement = true;
-  const canUseTagAnalytics = true;
+  
+  // --- Feature Gating ---
+  const features = getFeatureAccess(userProfile);
+  
+  const canUseTagManagement = features.canUseTagManagement;
+  const canUseTagAnalytics = features.canUseTagAnalytics;
+  const canUseDisciplineAnalysis = features.canUseDisciplineAnalysis;
+  const canUseStrategies = features.canUseStrategies;
 
   // --- Effects ---
   useEffect(() => {
@@ -199,6 +217,7 @@ export default function App() {
       if (!u) {
         setUser(null);
         setIsAuthLoading(false);
+        setIsProfileLoading(false);
         setIsSwitching(false);
         return;
       }
@@ -213,39 +232,45 @@ export default function App() {
             const updatedData = snapshot.data() as UserProfile;
             setUserProfile(updatedData);
             
-            // Only update initialCapital state if it's different from current
-            // This prevents overwriting unsaved user edits in Settings
+            // Rule: Firestore is source of truth.
             if (updatedData.initialCapital !== undefined) {
-              setInitialCapital(prev => {
-                if (prev === null) {
-                  setLocalSettingsCapital(updatedData.initialCapital!.toString());
-                  return updatedData.initialCapital!;
-                }
-                return updatedData.initialCapital!;
-              });
-            } else {
-              setInitialCapital(10000);
-              setLocalSettingsCapital('10000');
+              setInitialCapital(updatedData.initialCapital);
+              // Only update settings input if it's NOT focused to avoid cursor jumps
+              // Actually we will use force sync for settings input only on first load or when saved
+              setLocalSettingsCapital(updatedData.initialCapital.toString());
+              localStorage.setItem(`initial_capital_${u.uid}`, updatedData.initialCapital.toString());
             }
             
             if (updatedData.disciplineMode) {
               setDisciplineMode(updatedData.disciplineMode);
             }
+            if (updatedData.disciplineGrades) {
+              setDisciplineGrades(updatedData.disciplineGrades);
+              setTempGrades(updatedData.disciplineGrades);
+            } else {
+              setTempGrades({ S: 90, A: 80, B: 70 });
+            }
           } else {
             // Profile doesn't exist, create it once
+            const savedFallback = localStorage.getItem(`initial_capital_${u.uid}`);
+            const initialCap = savedFallback ? parseFloat(savedFallback) : 10000;
+            
             const profileData: UserProfile = {
               uid: u.uid,
               email: u.email || '',
               displayName: u.displayName || '',
               photoURL: u.photoURL || '',
-              initialCapital: 10000,
+              initialCapital: initialCap,
               plan: 'free',
               role: 'user',
               disciplineMode: 'semi',
+              disciplineGrades: { S: 90, A: 80, B: 70 },
               createdAt: serverTimestamp() as any,
               updatedAt: serverTimestamp() as any,
             };
             setDoc(profileRef, profileData);
+            setInitialCapital(initialCap);
+            setLocalSettingsCapital(initialCap.toString());
           }
           setIsProfileLoading(false);
           setIsAuthLoading(false);
@@ -266,10 +291,24 @@ export default function App() {
           orderBy('date', 'desc')
         );
         const unsubTrades = onSnapshot(tradesQuery, (snap) => {
-          const tradesData = snap.docs.map(doc => ({
+          let tradesData = snap.docs.map(doc => ({
             ...doc.data(),
             id: doc.id
           })) as Transaction[];
+
+          // Data Healing: Ensure uValue sign matches Result
+          tradesData = tradesData.map(t => {
+            if (t.result === 'Loss' && t.uValue > 0) {
+              console.warn(`[Healing] Transaction ${t.id}: Loss trade with positive uValue. Correcting sign.`);
+              return { ...t, uValue: -Math.abs(t.uValue) };
+            }
+            if (t.result === 'Profit' && t.uValue < 0) {
+              console.warn(`[Healing] Transaction ${t.id}: Profit trade with negative uValue. Correcting sign.`);
+              return { ...t, uValue: Math.abs(t.uValue) };
+            }
+            return t;
+          });
+
           console.log(`[Trades] Received ${tradesData.length} records for:`, u.uid);
           setTransactions(tradesData);
         }, (err) => {
@@ -298,53 +337,59 @@ export default function App() {
 
         // 5. Setup real-time sync for strategies
         console.log('[Perf] strategies listener started');
-        const strategiesPath = `users/${u.uid}/strategies`;
         const strategiesQuery = query(collection(db, 'users', u.uid, 'strategies'), orderBy('createdAt', 'desc'));
-        const unsubStrategies = onSnapshot(strategiesQuery, (snap) => {
-          const strategiesData = snap.docs.map(doc => ({
+        const unsubStrategies = onSnapshot(strategiesQuery, async (snap) => {
+          let strategiesData = snap.docs.map(doc => ({
             ...doc.data(),
             id: doc.id
           })) as StrategyTemplate[];
-          console.log(`[Strategies] Received ${strategiesData.length} records for:`, u.uid);
+          
+          // Enforce one global strategy
+          if (strategiesData.length === 0) {
+            console.log('[Strategies] Creating default global strategy');
+            const strategyId = 'global-strategy';
+            const strategyRef = doc(db, 'users', u.uid, 'strategies', strategyId);
+            const defaultStrategy: StrategyTemplate = {
+              id: strategyId,
+              userId: u.uid,
+              name: '全域交易規範',
+              description: '主動套用於所有交易的全域防呆與紀律規範。',
+              isFavorite: true,
+              createdAt: serverTimestamp() as any,
+              updatedAt: serverTimestamp() as any,
+            };
+            await setDoc(strategyRef, defaultStrategy);
+            return; // Wait for next snapshot
+          } else if (strategiesData.length > 1) {
+            console.log('[Strategies] Multiple strategies detected, pruning...');
+            // Keep the first one, delete others
+            const toKeep = strategiesData[0];
+            const toDelete = strategiesData.slice(1);
+            for (const s of toDelete) {
+              await deleteDoc(doc(db, 'users', u.uid, 'strategies', s.id));
+            }
+            strategiesData = [toKeep];
+          }
+
           setStrategies(strategiesData);
 
-          // Manage nested item listeners to avoid accumulation
-          const currentStrategyIds = new Set(strategiesData.map(s => s.id));
+          const strategy = strategiesData[0];
           
-          // Clean up items state for removed strategies
-          setChecklistItems(prev => prev.filter(item => currentStrategyIds.has(item.templateId)));
-          
-          // Cleanup listeners for removed strategies
-          Object.keys(itemUnsubscribes.current).forEach(id => {
-            if (!currentStrategyIds.has(id)) {
-              itemUnsubscribes.current[id]();
-              delete itemUnsubscribes.current[id];
-            }
-          });
-
-          // Setup listeners for new strategies
-          strategiesData.forEach(strategy => {
-            if (!itemUnsubscribes.current[strategy.id]) {
-              const itemsPath = `users/${u.uid}/strategies/${strategy.id}/items`;
-              const itemsQuery = query(collection(db, 'users', u.uid, 'strategies', strategy.id, 'items'), orderBy('sortOrder', 'asc'));
-              const unsubItems = onSnapshot(itemsQuery, (itemSnap) => {
-                const itemsData = itemSnap.docs.map(iDoc => ({ ...iDoc.data(), id: iDoc.id })) as StrategyChecklistItem[];
-                setChecklistItems(prev => {
-                  const otherItems = prev.filter(item => item.templateId !== strategy.id);
-                  return [...otherItems, ...itemsData];
-                });
-              }, (err) => {
-                console.error(`[Items] Load failed for ${strategy.id}:`, err);
-                handleFirestoreError(err, OperationType.LIST, itemsPath);
-              });
-              itemUnsubscribes.current[strategy.id] = unsubItems;
-            }
-          });
+          // Setup listener for the global strategy items
+          if (!itemUnsubscribes.current[strategy.id]) {
+            const itemsQuery = query(collection(db, 'users', u.uid, 'strategies', strategy.id, 'items'), orderBy('sortOrder', 'asc'));
+            const unsubItems = onSnapshot(itemsQuery, (itemSnap) => {
+              const itemsData = itemSnap.docs.map(iDoc => ({ ...iDoc.data(), id: iDoc.id })) as StrategyChecklistItem[];
+              setChecklistItems(itemsData);
+            });
+            itemUnsubscribes.current[strategy.id] = unsubItems;
+          }
         }, (err) => {
           console.error('[Strategies] Load failed:', err);
-          handleFirestoreError(err, OperationType.LIST, strategiesPath);
+          handleFirestoreError(err, OperationType.LIST, `users/${u.uid}/strategies`);
         });
         unsubscribes.current.push(unsubStrategies);
+
 
       } catch (error) {
         console.error('[Auth] Error during initialization:', error);
@@ -380,7 +425,7 @@ export default function App() {
     const existing = tags.find(t => t.name.toLowerCase() === normalized.toLowerCase());
     if (existing) return existing;
 
-    const tagId = Math.random().toString(36).substr(2, 9);
+    const tagId = crypto.randomUUID();
     const tagPath = `users/${effectiveUserId}/tags/${tagId}`;
     console.log('[Tag Write]', tagPath);
     
@@ -417,32 +462,73 @@ export default function App() {
     }
   }, [effectiveUserId, canUseTagManagement]);
 
+  const syncTagsToTrades = useCallback(async (
+    targetTransactions: Transaction[],
+    currentTags: Tag[]
+  ) => {
+    if (!effectiveUserId || targetTransactions.length === 0) return;
+
+    // Rule 1 & 3: Single source of truth - items not in currentTags must be purged
+    const activeTagIds = new Set(currentTags.map(t => t.id));
+    const CHUNK_SIZE = 50;
+
+    const tradesToUpdate = targetTransactions.filter(tx => {
+      if (!tx.tagIds || tx.tagIds.length === 0) return false;
+      const cleaned = tx.tagIds.filter(id => activeTagIds.has(id));
+      return cleaned.length !== tx.tagIds.length;
+    });
+
+    if (tradesToUpdate.length === 0) return;
+
+    const toastId = toast.loading(`正在同步 ${tradesToUpdate.length} 筆交易標籤...`);
+    
+    for (let i = 0; i < tradesToUpdate.length; i += CHUNK_SIZE) {
+      const chunk = tradesToUpdate.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      
+      chunk.forEach(tx => {
+        const cleaned = tx.tagIds.filter(id => activeTagIds.has(id));
+        const tradeRef = doc(db, 'users', effectiveUserId!, 'trades', tx.id);
+        batch.update(tradeRef, {
+          tagIds: cleaned,
+          updatedAt: serverTimestamp()
+        });
+      });
+
+      try {
+        await batch.commit();
+      } catch (err) {
+        console.error('[Tag Sync] Batch failed:', err);
+      }
+    }
+    
+    toast.success('標籤同步完成', { id: toastId });
+  }, [effectiveUserId]);
+
   const handleDeleteTag = useCallback(async (id: string) => {
     if (!effectiveUserId || !canUseTagManagement) return;
+    const toastId = toast.loading('正在刪除標籤...');
     try {
       const tagRef = doc(db, 'users', effectiveUserId, 'tags', id);
       await deleteDoc(tagRef);
-
-      // Remove tag from all transactions
-      const affected = transactions.filter(tx => tx.tagIds?.includes(id));
-      for (const tx of affected) {
-        const txRef = doc(db, 'users', effectiveUserId, 'trades', tx.id);
-        await updateDoc(txRef, {
-          tagIds: tx.tagIds.filter(tid => tid !== id),
-          updatedAt: serverTimestamp()
-        });
-      }
+      
+      // Rule 3: Trigger batch removal from all trades (Sync Tags to Trades)
+      const remainingTags = tags.filter(t => t.id !== id);
+      await syncTagsToTrades(transactions, remainingTags);
+      
+      toast.success('標籤已刪除並從交易紀錄中移除', { id: toastId });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `users/${effectiveUserId}/tags/${id}`);
+      toast.error('刪除標籤失敗', { id: toastId });
     }
-  }, [effectiveUserId, canUseTagManagement, transactions]);
+  }, [effectiveUserId, canUseTagManagement, transactions, tags, syncTagsToTrades]);
 
   const handleAdd = useCallback(async (data: Partial<Transaction>) => {
     if (!effectiveUserId) {
       console.error('[Trade Write] Failed: User not logged in');
       return;
     }
-    const tradeId = Math.random().toString(36).substr(2, 9);
+    const tradeId = crypto.randomUUID();
     const tradePath = `users/${effectiveUserId}/trades/${tradeId}`;
     console.log('[Trade Write]', tradePath);
 
@@ -497,6 +583,32 @@ export default function App() {
     }
   }, [effectiveUserId, selectedTransaction]);
 
+  const handleBulkDelete = useCallback(async (ids: string[]) => {
+    if (!effectiveUserId || ids.length === 0) return;
+    const toastId = toast.loading(`正在刪除 ${ids.length} 筆交易...`);
+    try {
+      const CHUNK_SIZE = 50;
+      for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+        const chunk = ids.slice(i, i + CHUNK_SIZE);
+        const batch = writeBatch(db);
+        chunk.forEach(id => {
+          const txRef = doc(db, 'users', effectiveUserId, 'trades', id);
+          batch.delete(txRef);
+        });
+        await batch.commit();
+      }
+      
+      if (selectedTransaction && ids.includes(selectedTransaction.id)) {
+        setSelectedTransaction(null);
+        setCurrentView('dashboard');
+      }
+      toast.success(`已成功刪除 ${ids.length} 筆交易`, { id: toastId });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${effectiveUserId}/trades/bulk`);
+      toast.error('批量刪除失敗', { id: toastId });
+    }
+  }, [effectiveUserId, selectedTransaction]);
+
   const handleLogin = async () => {
     setIsAuthLoading(true);
     setAuthError(null);
@@ -513,20 +625,19 @@ export default function App() {
   };
 
   const handleSwitchAccount = async () => {
-    console.log('[Perf] account switched, cleanup done');
+    console.log('[Auth] Switching account, cleaning up...');
     setIsSwitching(true);
     try {
+      cleanupListeners();
       await signOut(auth);
-      // Clear local UI state immediately to prevent flicker
-      setUser(null);
-      setSelectedTransaction(null);
-      setCurrentView('dashboard');
+      resetAppState();
       
-      // Trigger new login with account selector (forced by provider config)
+      // Trigger login once logged out
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
       if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
-        console.error('Switch account failed:', error);
+        console.error('Account switch failed:', error);
+        toast.error('切換帳戶失敗');
       }
     } finally {
       setIsSwitching(false);
@@ -535,29 +646,166 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
+      cleanupListeners();
       if (user) {
         await signOut(auth);
       }
-      setUser(null);
-      setUserProfile(null);
-      setSelectedTransaction(null);
-      setCurrentView('dashboard');
+      resetAppState();
+      toast.success('已成功登出');
     } catch (error) {
       console.error('Logout failed:', error);
+      toast.error('登出失敗');
     }
   };
 
+  const syncTradeDiscipline = useCallback(async (
+    targetTransactions: Transaction[],
+    currentItems: StrategyChecklistItem[],
+    grades: DisciplineGrades
+  ) => {
+    if (!effectiveUserId || targetTransactions.length === 0) return;
+    
+    // Rule 1 & 3 & 4: Ensure deleted items are RIPPED OUT from snapshots
+    const activeGlobalItems = currentItems.filter(i => i.active);
+    const activeGlobalItemIds = new Set(activeGlobalItems.map(i => i.id));
+    
+    // We will do this in chunks to avoid overwhelming the client/server
+    const CHUNK_SIZE = 50;
+    const tradesToUpdate = targetTransactions.filter(t => {
+      const existingSnapshot = t.checklistSnapshot || [];
+      
+      // Clean the snapshot: remove items that are no longer in activeGlobalItems
+      const cleanedExistingSnapshot = existingSnapshot.filter(s => activeGlobalItemIds.has(s.itemId));
+      const checkedMap = new Map(cleanedExistingSnapshot.map(s => [s.itemId, s.checked]));
+      
+      const newSnapshot = activeGlobalItems.map(gi => ({
+        itemId: gi.id,
+        text: gi.text,
+        weight: gi.weight,
+        required: gi.required,
+        checked: checkedMap.get(gi.id) || false,
+        sortOrder: gi.sortOrder
+      }));
+      
+      const newScore = calculateDisciplineScore(newSnapshot);
+      const newPassed = calculatePassedRequired(newSnapshot);
+      const newRating = calculateGrade(newScore, grades);
+      
+      const hasGhostItems = existingSnapshot.length !== cleanedExistingSnapshot.length;
+
+      return (
+        hasGhostItems ||
+        newScore !== t.checklistScore || 
+        newPassed !== t.passedRequiredCheck || 
+        newRating !== t.rating ||
+        JSON.stringify(newSnapshot) !== JSON.stringify(existingSnapshot)
+      );
+    });
+
+    if (tradesToUpdate.length === 0) return;
+
+    const toastId = toast.loading(`正在更新 ${tradesToUpdate.length} 筆交易紀律數據...`);
+    console.log(`[Sync] Found ${tradesToUpdate.length} trades needing updates`);
+    
+    // Process in chunks
+    for (let i = 0; i < tradesToUpdate.length; i += CHUNK_SIZE) {
+      const chunk = tradesToUpdate.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      
+      chunk.forEach(t => {
+        const existingSnapshot = t.checklistSnapshot || [];
+        // Clean snapshot: ensure only currently defined rules are carried over
+        const cleanedExistingSnapshot = existingSnapshot.filter(s => activeGlobalItemIds.has(s.itemId));
+        const checkedMap = new Map(cleanedExistingSnapshot.map(s => [s.itemId, s.checked]));
+        
+        const newSnapshot = activeGlobalItems.map(gi => ({
+          itemId: gi.id,
+          text: gi.text,
+          weight: gi.weight,
+          required: gi.required,
+          checked: checkedMap.get(gi.id) || false,
+          sortOrder: gi.sortOrder
+        }));
+        
+        const newScore = calculateDisciplineScore(newSnapshot);
+        const newPassed = calculatePassedRequired(newSnapshot);
+        const newRating = calculateGrade(newScore, grades);
+
+        const tradeRef = doc(db, 'users', effectiveUserId!, 'trades', t.id);
+        batch.update(tradeRef, {
+          checklistScore: newScore,
+          passedRequiredCheck: newPassed,
+          rating: newRating,
+          checklistSnapshot: newSnapshot,
+          updatedAt: serverTimestamp()
+        });
+      });
+
+      try {
+        await batch.commit();
+      } catch (err) {
+        console.error('[Sync] Batch update failed:', err);
+      }
+    }
+    
+    toast.success('歷史交易資料已同步完成', { id: toastId });
+    console.log(`[Sync] Successfully updated ${tradesToUpdate.length} trades`);
+  }, [effectiveUserId]);
+
+
   const updateDisciplineMode = async (mode: DisciplineMode) => {
     if (!effectiveUserId) return;
+    setDisciplineMode(mode);
     try {
-      setDisciplineMode(mode);
       const profileRef = doc(db, 'users', effectiveUserId);
       await updateDoc(profileRef, {
         disciplineMode: mode,
         updatedAt: serverTimestamp()
       });
+      toast.success(`已切換至 ${mode === 'relaxed' ? '寬鬆' : mode === 'semi' ? '半強制' : '嚴格'} 模式`);
     } catch (error) {
       console.error('Failed to update discipline mode:', error);
+      toast.error('模式更新失敗');
+    }
+  };
+
+  const handleSaveGrades = async () => {
+    if (!effectiveUserId) return;
+
+    if (tempGrades.S <= tempGrades.A || tempGrades.A <= tempGrades.B || tempGrades.B <= 0 || tempGrades.S > 100) {
+      toast.error('區間設定錯誤，請確保 S > A > B > 0 且 S <= 100');
+      return;
+    }
+
+    if (tempGrades.S - tempGrades.A < 5 || tempGrades.A - tempGrades.B < 5 || tempGrades.B < 5) {
+      toast.error('每個區間至少需有 5 分');
+      return;
+    }
+
+    const toastId = toast.loading('正在儲存設定並同步歷史交易...');
+    try {
+      setDisciplineGrades(tempGrades);
+      const profileRef = doc(db, 'users', effectiveUserId);
+      await setDoc(profileRef, {
+        disciplineGrades: tempGrades,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      // Update locally affected transactions
+      const tradesToUpdate = transactions.filter(t => typeof t.checklistScore === 'number');
+      const updatePromises = tradesToUpdate.map(t => {
+        const newRating = calculateGrade(t.checklistScore!, tempGrades);
+        if (newRating !== t.rating) {
+          return updateDoc(doc(db, 'users', effectiveUserId, 'trades', t.id), { rating: newRating });
+        }
+        return Promise.resolve();
+      });
+
+      await Promise.all(updatePromises);
+      toast.success('評分區間與歷史資料已成功同步更新', { id: toastId });
+    } catch (error) {
+      console.error('Failed to update discipline grades:', error);
+      toast.error('更新失敗', { id: toastId });
     }
   };
   
@@ -587,6 +835,35 @@ export default function App() {
       setIsSidebarOpen(true);
     }
   };
+
+  // --- Integrity Check & Auto-Sync ---
+  useEffect(() => {
+    if (isAuthLoading || !effectiveUserId || transactions.length === 0 || checklistItems.length === 0) return;
+    
+    // Check for "ghost" items in snapshots (Rule 6: Auto-clean on startup)
+    const activeItemIds = new Set(checklistItems.map(i => i.id));
+    const tradesNeedCleaningChecklist = transactions.filter(t => {
+      if (!t.checklistSnapshot) return false;
+      return t.checklistSnapshot.some(item => !activeItemIds.has(item.itemId));
+    });
+
+    if (tradesNeedCleaningChecklist.length > 0) {
+      console.warn(`[Integrity] Detected ${tradesNeedCleaningChecklist.length} trades with deleted rule items. Triggering synchronization...`);
+      syncTradeDiscipline(transactions, checklistItems, disciplineGrades);
+    }
+
+    // Rule 6: Check for "ghost" tags in trades
+    const activeTagIds = new Set(tags.map(t => t.id));
+    const tradesNeedCleaningTags = transactions.filter(t => {
+      if (!t.tagIds || t.tagIds.length === 0) return false;
+      return t.tagIds.some(tagId => !activeTagIds.has(tagId));
+    });
+
+    if (tradesNeedCleaningTags.length > 0) {
+      console.warn(`[Integrity] Detected ${tradesNeedCleaningTags.length} trades with ghost tags. Triggering synchronization...`);
+      syncTagsToTrades(transactions, tags);
+    }
+  }, [transactions.length, checklistItems.length, tags.length, effectiveUserId, isAuthLoading]);
 
   return (
     <div 
@@ -726,6 +1003,12 @@ export default function App() {
                 <div className="flex flex-col min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-bold truncate">{user.displayName}</span>
+                    {features.hasPremiumAccess && (
+                      <div className="flex items-center gap-1 px-1.5 py-0.5 bg-white text-black rounded text-[8px] font-black uppercase tracking-widest">
+                        <Zap size={8} fill="black" />
+                        PRO
+                      </div>
+                    )}
                   </div>
                   <span className="text-[10px] text-neutral-500 truncate">{user.email}</span>
                 </div>
@@ -771,9 +1054,23 @@ export default function App() {
         )}
         
         <div className="max-w-5xl mx-auto">
-          {isAuthLoading ? (
-            <div className="h-full flex items-center justify-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+          {isAuthLoading || (user && isProfileLoading) ? (
+            <div className="h-[80vh] flex flex-col items-center justify-center gap-4">
+              <div className="relative w-12 h-12">
+                <motion.div 
+                  className="absolute inset-0 border-2 border-white/10 rounded-full"
+                  animate={{ scale: [1, 1.2, 1], opacity: [0.1, 0.3, 0.1] }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                />
+                <motion.div 
+                  className="absolute inset-0 border-t-2 border-white rounded-full"
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                />
+              </div>
+              <p className="text-[10px] text-neutral-500 uppercase tracking-[0.2em] font-black animate-pulse">
+                Synchronizing Journal
+              </p>
             </div>
           ) : !effectiveUserId ? (
             <div className="h-[80vh] flex flex-col items-center justify-center text-center space-y-6">
@@ -886,6 +1183,7 @@ export default function App() {
                         onView={(t) => { setSelectedTransaction(t); setCurrentView('detail'); }}
                         onEdit={(t) => { setSelectedTransaction(t); setCurrentView('edit'); }}
                         onDelete={handleDelete}
+                        onBulkDelete={handleBulkDelete}
                       />
                     </div>
                   </>
@@ -911,6 +1209,7 @@ export default function App() {
                   onView={(t) => { setSelectedTransaction(t); setCurrentView('detail'); }}
                   onEdit={(t) => { setSelectedTransaction(t); setCurrentView('edit'); }}
                   onDelete={handleDelete}
+                  onBulkDelete={handleBulkDelete}
                 />
               </motion.div>
             )}
@@ -930,6 +1229,9 @@ export default function App() {
                   canManageTags={canUseTagManagement}
                   strategies={strategies}
                   checklistItems={checklistItems}
+                  disciplineMode={disciplineMode}
+                  disciplineGrades={disciplineGrades}
+                  globalStrategyOnly={!features.canUseStrategies}
                 />
               </motion.div>
             )}
@@ -946,10 +1248,17 @@ export default function App() {
                   allTags={tags}
                   onAddGlobalTag={handleAddGlobalTag}
                   onSubmit={handleUpdate} 
-                  onCancel={() => setCurrentView('dashboard')} 
+                  onCancel={() => {
+                    const prev = prevView.current;
+                    setSelectedTransaction(null);
+                    setCurrentView(prev === 'detail' ? 'detail' : 'dashboard');
+                  }} 
                   canManageTags={canUseTagManagement}
                   strategies={strategies}
                   checklistItems={checklistItems}
+                  disciplineMode={disciplineMode}
+                  disciplineGrades={disciplineGrades}
+                  globalStrategyOnly={!features.canUseStrategies}
                 />
               </motion.div>
             )}
@@ -990,10 +1299,15 @@ export default function App() {
                             className="bg-white text-black hover:bg-neutral-200 border-none font-black h-10 px-4"
                             onClick={async () => {
                               const val = Number(localSettingsCapital);
-                              if (isNaN(val)) return;
+                              if (isNaN(val)) {
+                                toast.error('請輸入有效的數字');
+                                return;
+                              }
                               
                               const toastId = toast.loading('正在更新設定...');
                               setInitialCapital(val);
+                              localStorage.setItem(`initial_capital_${effectiveUserId}`, val.toString());
+                              
                               if (effectiveUserId) {
                                 try {
                                   const profileRef = doc(db, 'users', effectiveUserId);
@@ -1001,11 +1315,13 @@ export default function App() {
                                     initialCapital: val,
                                     updatedAt: serverTimestamp()
                                   });
-                                  toast.success('初始資金已更新', { id: toastId });
+                                  toast.success('初始資金已儲存', { id: toastId });
                                 } catch (error) {
                                   console.error('Failed to update initial capital:', error);
-                                  toast.error('更新失敗', { id: toastId });
+                                  toast.error('儲存失敗，請檢查網路連線', { id: toastId });
                                 }
+                              } else {
+                                toast.success('已儲存至本地瀏覽器', { id: toastId });
                               }
                             }}
                           >
@@ -1102,6 +1418,85 @@ export default function App() {
                     </div>
                   </div>
 
+                  <div className="p-6 rounded-xl border border-border bg-card space-y-6">
+                    <div className="flex flex-col gap-1">
+                      <h3 className="font-bold flex items-center gap-2">
+                        <Zap size={18} className="text-primary" />
+                        執行評分自動化區間設定
+                      </h3>
+                      <p className="text-xs text-neutral-500">自訂紀律分數對應的執行等級範圍。修改後將同步更新歷史交易紀錄。</p>
+                    </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                          <div className="space-y-3">
+                            <Label className="text-[10px] uppercase tracking-widest text-[#A0A0A0] font-black">Grade S 門檻 (極優)</Label>
+                            <div className="flex items-center gap-2">
+                              <Input 
+                                type="text"
+                                inputMode="numeric"
+                                value={tempGrades.S} 
+                                onChange={(e) => {
+                                  const val = e.target.value.replace(/\D/g, '');
+                                  const num = parseInt(val) || 0;
+                                  if (num <= 100) setTempGrades({...tempGrades, S: num});
+                                }}
+                                className="bg-black border-[#2A2A2A] font-mono h-11 text-center font-bold"
+                              />
+                              <span className="text-xs text-neutral-500 font-bold shrink-0">~ 100</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-3">
+                            <Label className="text-[10px] uppercase tracking-widest text-[#A0A0A0] font-black">Grade A 門檻 (良好)</Label>
+                            <div className="flex items-center gap-2">
+                              <Input 
+                                type="text"
+                                inputMode="numeric"
+                                value={tempGrades.A} 
+                                onChange={(e) => {
+                                  const val = e.target.value.replace(/\D/g, '');
+                                  const num = parseInt(val) || 0;
+                                  if (num <= 100) setTempGrades({...tempGrades, A: num});
+                                }}
+                                className="bg-black border-[#2A2A2A] font-mono h-11 text-center font-bold"
+                              />
+                              <span className="text-xs text-neutral-500 font-bold shrink-0">~ {tempGrades.S - 1}</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-3">
+                            <Label className="text-[10px] uppercase tracking-widest text-[#A0A0A0] font-black">Grade B 門檻 (普通)</Label>
+                            <div className="flex items-center gap-2">
+                              <Input 
+                                type="text"
+                                inputMode="numeric"
+                                value={tempGrades.B} 
+                                onChange={(e) => {
+                                  const val = e.target.value.replace(/\D/g, '');
+                                  const num = parseInt(val) || 0;
+                                  if (num <= 100) setTempGrades({...tempGrades, B: num});
+                                }}
+                                className="bg-black border-[#2A2A2A] font-mono h-11 text-center font-bold"
+                              />
+                              <span className="text-xs text-neutral-500 font-bold shrink-0">~ {tempGrades.A - 1}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                    <div className="p-4 rounded-lg bg-neutral-900/50 border border-neutral-800 text-xs text-neutral-500">
+                      <p>• 低於 Grade B 門檻 ({tempGrades.B}) 的分數將自動歸類為 Grade C。</p>
+                      <p>• 建議每個等級區間至少保持 10 分的間隔。</p>
+                    </div>
+
+                    <Button 
+                      onClick={handleSaveGrades}
+                      className="w-full bg-white text-black hover:bg-neutral-200 gap-2 h-11 rounded-xl font-bold"
+                    >
+                      <RefreshCw size={16} />
+                      儲存並套用至所有紀錄
+                    </Button>
+                  </div>
+
                   <div className="p-6 rounded-xl border border-border bg-card space-y-4 text-center">
                     <h3 className="font-bold flex items-center justify-center gap-2 mb-2">
                       <Download size={18} className="text-primary" />
@@ -1191,6 +1586,7 @@ export default function App() {
                 <TransactionDetail 
                   transaction={selectedTransaction}
                   allTags={tags}
+                  checklistItems={checklistItems}
                   onClose={() => setCurrentView('dashboard')}
                   onEdit={(t) => { setSelectedTransaction(t); setCurrentView('edit'); }}
                   onDelete={handleDelete}
@@ -1204,8 +1600,38 @@ export default function App() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
+                className="space-y-8"
               >
-                <TagAnalysis transactions={transactions} allTags={tags} />
+                {!features.canUseTagAnalytics && !features.canUseDisciplineAnalysis ? (
+                  <Paywall 
+                    featureName="進階數據分析"
+                    description="透過標籤獲利統計與紀律度分析，找出您的交易盲點並透過數據提升勝率。"
+                    onUpgrade={() => toast.info('Beta 測試期間暫無收費，請直接使用')}
+                  />
+                ) : (
+                  <>
+                    <div className="flex flex-col gap-1">
+                      <h1 className="text-3xl font-bold tracking-tight">數據分析</h1>
+                      <p className="text-neutral-500 text-sm">深入了解您的交易表現與紀律執行度。</p>
+                    </div>
+
+                    <div className="space-y-8">
+                      <section className="space-y-4">
+                        <h2 className="text-[10px] uppercase font-black tracking-[0.3em] text-neutral-500 border-l-2 border-primary pl-3">紀律執行分析</h2>
+                        <DisciplineAnalysis 
+                          transactions={transactions} 
+                          grades={disciplineGrades} 
+                          checklistItems={checklistItems} 
+                        />
+                      </section>
+
+                      <section className="space-y-4">
+                        <h2 className="text-[10px] uppercase font-black tracking-[0.3em] text-neutral-500 border-l-2 border-primary pl-3">標籤獲利分析</h2>
+                        <TagAnalysis transactions={transactions} allTags={tags} />
+                      </section>
+                    </div>
+                  </>
+                )}
               </motion.div>
             )}
 
@@ -1216,11 +1642,23 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
               >
-                <StrategyManagement 
-                  userId={effectiveUserId!} 
-                  strategies={strategies} 
-                  checklistItems={checklistItems} 
-                />
+                {!features.canUseStrategies ? (
+                  <Paywall 
+                    featureName="交易策略與規範管理"
+                    description="建立專屬於您的交易模板與出手核對清單，將紀律轉化為可重複的成功模式。"
+                    onUpgrade={() => toast.info('Beta 測試期間暫無收費，請直接使用')}
+                  />
+                ) : (
+                  <StrategyManagement 
+                    userId={effectiveUserId!} 
+                    strategies={strategies} 
+                    checklistItems={checklistItems} 
+                    transactions={transactions}
+                    onSyncAllTrades={() => {
+                      syncTradeDiscipline(transactions, checklistItems, disciplineGrades);
+                    }}
+                  />
+                )}
               </motion.div>
             )}
 
@@ -1231,12 +1669,20 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
               >
-                <TagManagement 
-                  tags={tags}
-                  onRenameTag={handleRenameTag}
-                  onDeleteTag={handleDeleteTag}
-                  onAddTag={handleAddGlobalTag}
-                />
+                {!features.canUseTagManagement ? (
+                  <Paywall 
+                    featureName="標籤管理系統"
+                    description="集中管理您的交易標籤，透過系統化的分類追蹤找出最具優勢的技術訊號。"
+                    onUpgrade={() => toast.info('Beta 測試期間暫無收費，請直接使用')}
+                  />
+                ) : (
+                  <TagManagement 
+                    tags={tags}
+                    onRenameTag={handleRenameTag}
+                    onDeleteTag={handleDeleteTag}
+                    onAddTag={handleAddGlobalTag}
+                  />
+                )}
               </motion.div>
             )}
           </AnimatePresence>

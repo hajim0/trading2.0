@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
-import { Transaction, Tag } from '../types';
+import { Transaction, Tag, StrategyChecklistItem } from '../types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { X, Calendar, TrendingUp, TrendingDown, Star, DollarSign, ArrowLeft, Maximize2, Trash2, Sparkles, Loader2, ShieldCheck, Check, ShieldAlert } from 'lucide-react';
-import { cn, safeFormat } from '@/lib/utils';
+import { cn, safeFormat, formatCurrency, getPnLColor } from '@/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface TransactionDetailProps {
   transaction: Transaction;
   allTags: Tag[];
+  checklistItems: StrategyChecklistItem[];
   onClose: () => void;
   onEdit: (t: Transaction) => void;
   onDelete: (id: string) => void;
@@ -46,11 +47,16 @@ const ActivityIcon = ({ size, className }: any) => (
 export const TransactionDetail: React.FC<TransactionDetailProps> = ({
   transaction,
   allTags,
+  checklistItems,
   onClose,
   onEdit,
   onDelete,
 }) => {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+
+  // Whitelist items based on global config (Rule 2 & 5)
+  const activeIds = new Set(checklistItems.map(i => i.id));
+  const filteredSnapshot = (transaction.checklistSnapshot || []).filter(item => activeIds.has(item.itemId));
 
   const getScoreColor = (score: number) => {
     if (score >= 90) return "text-[#22C55E]";
@@ -91,13 +97,12 @@ export const TransactionDetail: React.FC<TransactionDetailProps> = ({
               </div>
             </div>
             <div className={cn(
-              "px-4 py-2 rounded-lg border font-mono text-lg font-black tracking-tighter",
-              transaction.result === 'Profit' ? 'text-[#22C55E] border-[#22C55E]/20 bg-[#22C55E]/5' :
-              transaction.result === 'Loss' ? 'text-[#EF4444] border-[#EF4444]/20 bg-[#EF4444]/5' :
-              'text-[#A0A0A0] border-[#2A2A2A] bg-black'
+              "px-4 py-2 rounded-lg border font-mono text-lg font-black tracking-tighter bg-black/40",
+              transaction.uValue > 0 ? "text-[#22C55E] border-[#22C55E]/30 bg-[#22C55E]/5" :
+              transaction.uValue < 0 ? "text-[#EF4444] border-[#EF4444]/30 bg-[#EF4444]/5" :
+              "text-[#A0A0A0] border-[#2A2A2A] bg-black"
             )}>
-              {transaction.result === 'Profit' ? '+' : transaction.result === 'Loss' ? '-' : ''}
-              {Math.abs(transaction.uValue).toLocaleString()} u
+              {formatCurrency(transaction.uValue)}
             </div>
           </CardHeader>
           <CardContent className="p-6 space-y-8">
@@ -121,10 +126,10 @@ export const TransactionDetail: React.FC<TransactionDetailProps> = ({
                   color={transaction.result === 'Profit' ? 'text-[#22C55E]' : transaction.result === 'Loss' ? 'text-[#EF4444]' : 'text-[#A0A0A0]'}
                 />
               <InfoItem 
-                label="數值" 
-                value={`${transaction.uValue} u`} 
+                label="盈虧金額" 
+                value={formatCurrency(transaction.uValue)} 
                 icon={DollarSign}
-                color="text-white font-mono"
+                color={getPnLColor(transaction.uValue)}
               />
             </div>
 
@@ -147,7 +152,7 @@ export const TransactionDetail: React.FC<TransactionDetailProps> = ({
                     </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {transaction.checklistSnapshot.map((item, idx) => (
+                    {filteredSnapshot.map((item, idx) => (
                       <div key={`snapshot-${idx}`} className="flex items-center gap-2 text-xs">
                         <div className={cn(
                           "w-4 h-4 rounded flex items-center justify-center",

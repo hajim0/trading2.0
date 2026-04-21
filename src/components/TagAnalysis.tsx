@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { TrendingUp, TrendingDown, BarChart2, Filter, Search, Tag as TagIcon, Layers, AlertCircle, ChevronRight, X as CloseIcon } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, formatPnL, getPnLColor, getWinRateColor } from '@/lib/utils';
+import { logger } from '../lib/logger';
 
 interface TagAnalysisProps {
   transactions: Transaction[];
@@ -83,33 +84,37 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
   }, [transactions, filterTag, filterSymbol, filterSide]);
 
   const tagStats = useMemo(() => {
-    console.log('[Perf] tag stats recalculated');
+    logger.log('[Perf] tag stats recalculated');
     const statsMap = new Map<string, TagStats>();
+
+    // Rule 1 & 5: Single Source of Truth - Initialize from allTags
+    allTags.forEach(tag => {
+      statsMap.set(tag.id, {
+        tag: tag.name,
+        totalTrades: 0,
+        winRate: 0,
+        avgReturn: 0,
+        totalProfit: 0,
+        maxLoss: 0,
+        profitCount: 0,
+        lossCount: 0,
+      });
+    });
 
     filteredTransactions.forEach(t => {
       if (!t.tagIds || t.tagIds.length === 0) return;
 
       t.tagIds.forEach(tagId => {
-        const tagName = tagMap.get(tagId);
-        if (!tagName) return;
-        
-        if (!statsMap.has(tagName)) {
-          statsMap.set(tagName, {
-            tag: tagName,
-            totalTrades: 0,
-            winRate: 0,
-            avgReturn: 0,
-            totalProfit: 0,
-            maxLoss: 0,
-            profitCount: 0,
-            lossCount: 0,
-          });
+        const stats = statsMap.get(tagId);
+        if (!stats) {
+          // Rule 6: Handle ghost tags
+          console.warn(`[TagAnalysis] Found ghost tag ${tagId} in trade ${t.id}. Skipping.`);
+          return;
         }
 
-        const stats = statsMap.get(tagName)!;
         stats.totalTrades++;
         
-        const val = t.result === 'Loss' ? -Math.abs(t.uValue) : Math.abs(t.uValue);
+        const val = t.uValue || 0;
         stats.totalProfit += val;
         
         if (t.result === 'Profit') {
@@ -123,12 +128,15 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
       });
     });
 
-    return Array.from(statsMap.values()).map(stats => ({
-      ...stats,
-      winRate: stats.totalTrades > 0 ? stats.profitCount / (stats.profitCount + stats.lossCount || 1) : 0,
-      avgReturn: stats.totalTrades > 0 ? stats.totalProfit / stats.totalTrades : 0,
-    })).sort((a, b) => b.totalProfit - a.totalProfit);
-  }, [filteredTransactions, tagMap]);
+    return Array.from(statsMap.values())
+      .filter(s => s.totalTrades > 0 && s.tag && s.tag.trim() !== '' && s.tag !== '---') // Rule 6: Filter empty or invalid names
+      .map(stats => ({
+        ...stats,
+        winRate: stats.totalTrades > 0 ? stats.profitCount / (stats.profitCount + stats.lossCount || 1) : 0,
+        avgReturn: stats.totalTrades > 0 ? stats.totalProfit / stats.totalTrades : 0,
+      }))
+      .sort((a, b) => b.totalProfit - a.totalProfit);
+  }, [filteredTransactions, allTags]);
 
   const combinationStats = useMemo(() => {
     console.log('[Perf] combination stats recalculated');
@@ -140,7 +148,10 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
     profitableTxs.forEach(t => {
       if (!t.tagIds || t.tagIds.length < 2) return;
 
-      const tagNames = t.tagIds
+      // Rule 1 & 5: Filter tagIds against global allTags
+      const validTagIds = t.tagIds.filter(id => allTags.some(tag => tag.id === id));
+      
+      const tagNames = validTagIds
         .map(id => tagMap.get(id))
         .filter((name): name is string => !!name)
         .sort((a, b) => a.localeCompare(b));
@@ -175,7 +186,7 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
         stats.profitCount++;
         stats.transactionIds.push(t.id);
         
-        const val = Math.abs(t.uValue);
+        const val = t.uValue || 0;
         stats.totalProfit += val;
       });
     });
@@ -196,7 +207,7 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
   }, [filteredTransactions, tagMap, comboSort]);
 
   const summaryStats = useMemo(() => {
-    console.log('[Perf] tag analysis summary recalculated');
+    logger.log('[Perf] tag analysis summary recalculated');
     const bestTag = tagStats.length > 0 ? tagStats[0] : null;
     const worstTag = tagStats.length > 0 ? tagStats[tagStats.length - 1] : null;
 
@@ -216,7 +227,15 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
 
   return (
     <div className="space-y-6 pb-10">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {transactions.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-24 text-neutral-500 bg-neutral-900/20 rounded-3xl border border-dashed border-neutral-800">
+          <BarChart2 size={48} className="mb-4 opacity-10" />
+          <h3 className="text-lg font-bold text-neutral-400">尚無分析數據</h3>
+          <p className="text-sm">新增交易紀錄後，系統將自動分析標籤表現。</p>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">進場理由標籤分析</h2>
           <p className="text-neutral-500 text-sm mt-1">分析不同進場策略的實際表現與優勢</p>
@@ -285,11 +304,11 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
                 <div>
                   <div className="text-2xl font-bold text-green-500">{bestTag.tag}</div>
                   <div className="text-xs text-neutral-500 mt-1">
-                    總收益: <span className="text-white font-mono">+{bestTag.totalProfit.toLocaleString()} u</span>
+                    總收益: <span className={cn("font-mono", getPnLColor(bestTag.totalProfit))}>{formatPnL(bestTag.totalProfit)}</span>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-sm font-medium">勝率: {(bestTag.winRate * 100).toFixed(1)}%</div>
+                  <div className={cn("text-sm font-medium", getWinRateColor(bestTag.winRate * 100))}>勝率: {(bestTag.winRate * 100).toFixed(1)}%</div>
                   <div className="text-xs text-neutral-500">交易數: {bestTag.totalTrades}</div>
                 </div>
               </div>
@@ -312,11 +331,11 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
                 <div>
                   <div className="text-2xl font-bold text-red-500">{worstTag.tag}</div>
                   <div className="text-xs text-neutral-500 mt-1">
-                    總收益: <span className="text-white font-mono">{worstTag.totalProfit.toLocaleString()} u</span>
+                    總收益: <span className={cn("font-mono", getPnLColor(worstTag.totalProfit))}>{formatPnL(worstTag.totalProfit)}</span>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-sm font-medium">勝率: {(worstTag.winRate * 100).toFixed(1)}%</div>
+                  <div className={cn("text-sm font-medium", getWinRateColor(worstTag.winRate * 100))}>勝率: {(worstTag.winRate * 100).toFixed(1)}%</div>
                   <div className="text-xs text-neutral-500">交易數: {worstTag.totalTrades}</div>
                 </div>
               </div>
@@ -346,8 +365,10 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-sm font-medium text-white">總收益: +{bestCombo.totalProfit.toLocaleString()} u</div>
-                  <div className="text-xs text-neutral-500">平均收益: {Math.round(bestCombo.avgReturn).toLocaleString()} u</div>
+                  <div className="text-sm font-medium text-white flex flex-col items-end">
+                    <span>總收益: {formatPnL(bestCombo.totalProfit)}</span>
+                    <span className="text-[10px] text-neutral-500">平均收益: {formatPnL(Math.round(bestCombo.avgReturn))}</span>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -369,12 +390,14 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
                 <div>
                   <div className="text-lg font-bold text-blue-500 leading-tight">{highestProfitCombo.name}</div>
                   <div className="text-xs text-neutral-500 mt-1">
-                    總收益: <span className="text-white font-mono">+{highestProfitCombo.totalProfit.toLocaleString()} u</span>
+                    總收益: <span className="text-white font-mono">{highestProfitCombo.totalProfit > 0 ? '+' : ''}{highestProfitCombo.totalProfit.toLocaleString()} u</span>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-sm font-medium text-white">盈利次數: {highestProfitCombo.profitCount} 次</div>
-                  <div className="text-xs text-neutral-500">平均收益: {Math.round(highestProfitCombo.avgReturn).toLocaleString()} u</div>
+                  <div className="text-sm font-medium text-white flex flex-col items-end">
+                    <span>總收益: {formatPnL(highestProfitCombo.totalProfit)}</span>
+                    <span className="text-[10px] text-neutral-500">平均收益: {formatPnL(Math.round(highestProfitCombo.avgReturn))}</span>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -461,13 +484,16 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
                       </div>
                     </td>
                     <td className="py-3 px-4 text-center font-mono">
-                      <span className="px-2 py-0.5 rounded text-xs bg-green-500/10 text-green-500 font-bold">
-                        +{stats.totalProfit.toLocaleString()} u
-                      </span>
+                      <div className={cn(
+                        "px-2 py-0.5 rounded text-xs font-bold bg-black/40 border border-border",
+                        getPnLColor(stats.totalProfit)
+                      )}>
+                        {formatPnL(stats.totalProfit)}
+                      </div>
                     </td>
                     <td className="py-3 px-4 text-center font-mono">
-                      <span className="text-green-500">
-                        +{Math.round(stats.avgReturn).toLocaleString()}
+                       <span className={getPnLColor(stats.avgReturn)}>
+                        {formatPnL(Math.round(stats.avgReturn))}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right">
@@ -549,10 +575,10 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
                             {t.result}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-right font-mono">
-                          <span className={t.result === 'Profit' ? "text-green-500" : t.result === 'Loss' ? "text-red-500" : ""}>
-                            {t.result === 'Profit' ? '+' : ''}{t.uValue.toLocaleString()}
-                          </span>
+                        <td className="py-3 px-4 text-right font-mono text-sm font-bold">
+                          <div className={getPnLColor(t.uValue)}>
+                            {formatPnL(t.uValue)}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -599,7 +625,7 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
                       <div className="flex flex-col items-center gap-1">
                         <span className={cn(
                           "font-bold",
-                          stats.winRate >= 0.6 ? "text-green-500" : stats.winRate >= 0.4 ? "text-white" : "text-red-500"
+                          getWinRateColor(stats.winRate * 100)
                         )}>
                           {(stats.winRate * 100).toFixed(1)}%
                         </span>
@@ -607,7 +633,7 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
                           <div 
                             className={cn(
                               "h-full",
-                              stats.winRate >= 0.6 ? "bg-green-500" : stats.winRate >= 0.4 ? "bg-blue-500" : "bg-red-500"
+                              stats.winRate >= 0.5 ? "bg-green-500" : "bg-red-500"
                             )}
                             style={{ width: `${stats.winRate * 100}%` }}
                           />
@@ -615,20 +641,20 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
                       </div>
                     </td>
                     <td className="py-3 px-4 text-center font-mono">
-                      <span className={stats.avgReturn >= 0 ? "text-green-500" : "text-red-500"}>
-                        {stats.avgReturn >= 0 ? '+' : ''}{Math.round(stats.avgReturn).toLocaleString()}
+                      <span className={getPnLColor(stats.avgReturn)}>
+                        {formatPnL(Math.round(stats.avgReturn))}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-center font-mono">
-                      <span className={cn(
-                        "px-2 py-0.5 rounded text-xs",
-                        stats.totalProfit >= 0 ? "bg-green-500/10 text-green-500" : "bg-red-500/10 text-red-500"
+                      <div className={cn(
+                        "px-2 py-0.5 rounded text-xs font-bold inline-block border border-border bg-black/40",
+                        getPnLColor(stats.totalProfit)
                       )}>
-                        {stats.totalProfit >= 0 ? '+' : ''}{stats.totalProfit.toLocaleString()} u
-                      </span>
+                        {formatPnL(stats.totalProfit)}
+                      </div>
                     </td>
-                    <td className="py-3 px-4 text-right font-mono text-red-400">
-                      {stats.maxLoss.toLocaleString()} u
+                    <td className="py-3 px-4 text-right font-mono">
+                       <span className={getPnLColor(stats.maxLoss)}>{formatPnL(stats.maxLoss)}</span>
                     </td>
                   </tr>
                 ))}
@@ -644,6 +670,8 @@ export const TagAnalysis: React.FC<TagAnalysisProps> = React.memo(({ transaction
           </div>
         </CardContent>
       </Card>
+      </>
+      )}
     </div>
   );
 });

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { StrategyTemplate, StrategyChecklistItem, DisciplineMode } from '../types';
+import { StrategyTemplate, StrategyChecklistItem, DisciplineMode, DisciplineGrades, Transaction } from '../types';
 import { db, OperationType, handleFirestoreError } from '../firebase';
 import { collection, doc, addDoc, updateDoc, deleteDoc, setDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Plus, Trash2, GripVertical, Check, X, Star, ChevronRight, Settings2, AlertCircle, Save, Lock } from 'lucide-react';
+import { Plus, Trash2, GripVertical, Check, X, Star, ChevronRight, Settings2, AlertCircle, Save, Lock, ArrowRight, Activity } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -24,6 +24,8 @@ interface StrategyManagementProps {
   userId: string;
   strategies: StrategyTemplate[];
   checklistItems: StrategyChecklistItem[];
+  transactions: Transaction[];
+  onSyncAllTrades?: () => void;
 }
 
 // Separate component for internal checklist items to prevent entire list re-render on typing
@@ -62,6 +64,10 @@ const ChecklistItemRow = React.memo(({
     }
   }, [autoFocus]);
 
+  const handleUpdateAndSync = async (id: string, data: Partial<StrategyChecklistItem>) => {
+    onUpdate(id, data);
+  };
+
   const handleBlurText = () => {
     const trimmed = text.trim();
     if (trimmed !== item.text && trimmed.length > 0) {
@@ -94,10 +100,10 @@ const ChecklistItemRow = React.memo(({
             <Input 
               ref={inputRef}
               value={text} 
+              maxLength={15}
               onChange={e => {
-                if (e.target.value.length <= 500) {
-                  setText(e.target.value);
-                }
+                const val = e.target.value.slice(0, 15);
+                setText(val);
               }}
               onBlur={handleBlurText}
               onKeyDown={handleKeyDown}
@@ -106,9 +112,9 @@ const ChecklistItemRow = React.memo(({
             />
             <span className={cn(
               "absolute right-0 bottom-0 text-[10px] tabular-nums",
-              text.length >= 500 ? "text-destructive font-bold" : "text-muted-foreground"
+              text.length >= 15 ? "text-destructive font-bold" : "text-muted-foreground"
             )}>
-              {text.length}/500
+              {text.length}/15
             </span>
           </div>
           
@@ -168,8 +174,15 @@ const ChecklistItemRow = React.memo(({
   );
 });
 
-export function StrategyManagement({ userId, strategies, checklistItems }: StrategyManagementProps) {
+export function StrategyManagement({ userId, strategies, checklistItems, transactions, onSyncAllTrades }: StrategyManagementProps) {
   const [editingTemplate, setEditingTemplate] = useState<StrategyTemplate | null>(null);
+  
+  // Enforce single strategy: Auto-set editingTemplate if only one exists
+  useEffect(() => {
+    if (strategies.length === 1 && !editingTemplate) {
+      setEditingTemplate(strategies[0]);
+    }
+  }, [strategies, editingTemplate]);
   
   // Local state for template info to prevent typing lag
   const [localName, setLocalName] = useState('');
@@ -237,7 +250,7 @@ export function StrategyManagement({ userId, strategies, checklistItems }: Strat
     const trimmedName = newTemplateName.trim();
     if (!trimmedName || isProcessing) return;
     setIsProcessing(true);
-    const templateId = Math.random().toString(36).substr(2, 9);
+    const templateId = crypto.randomUUID();
     const templatePath = `users/${userId}/strategies/${templateId}`;
     try {
       const templateRef = doc(db, 'users', userId, 'strategies', templateId);
@@ -329,6 +342,8 @@ export function StrategyManagement({ userId, strategies, checklistItems }: Strat
         updatedAt: serverTimestamp()
       });
       setLastAddedItemId(newItemRef.id);
+      console.log('[Sync] Item added, triggering recalculation');
+      onSyncAllTrades?.();
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, itemsPath);
     } finally {
@@ -344,10 +359,12 @@ export function StrategyManagement({ userId, strategies, checklistItems }: Strat
         ...data,
         updatedAt: serverTimestamp()
       });
+      console.log('[Sync] Item updated, triggering recalculation');
+      onSyncAllTrades?.();
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, itemPath);
     }
-  }, [userId, editingTemplate?.id]);
+  }, [userId, editingTemplate?.id, onSyncAllTrades]);
 
   const handleDeleteItem = useCallback(async (itemId: string) => {
     if (!editingTemplate) return;
@@ -355,11 +372,13 @@ export function StrategyManagement({ userId, strategies, checklistItems }: Strat
     try {
       await deleteDoc(doc(db, 'users', userId, 'strategies', editingTemplate.id, 'items', itemId));
       toast.success('已刪除規範項');
+      console.log('[Sync] Item deleted, triggering recalculation');
+      onSyncAllTrades?.();
     } catch (err) {
       toast.error('移除失敗');
       handleFirestoreError(err, OperationType.DELETE, itemPath);
     }
-  }, [userId, editingTemplate?.id]);
+  }, [userId, editingTemplate?.id, onSyncAllTrades]);
 
   const handleUpdateTemplateInfo = async (data: Partial<StrategyTemplate>) => {
     if (!editingTemplate) return;
@@ -375,16 +394,16 @@ export function StrategyManagement({ userId, strategies, checklistItems }: Strat
 
   return (
     <div className="space-y-6 pb-20 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">紀律規範模板</h2>
-          <p className="text-muted-foreground text-sm">建立自訂交易規範與出手前確認清單 (Checklist)</p>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">策略與規範 (全域模式)</h2>
+            <p className="text-muted-foreground text-sm">此規範將即時套用於所有交易紀錄並自動更新分析數據。</p>
+          </div>
         </div>
-        {!editingTemplate && (
-          <Button onClick={() => setIsAdding(true)} className="rounded-full shadow-lg h-10">
-            <Plus className="mr-2 h-4 w-4" /> 新增規範
-          </Button>
-        )}
+
+        <AnimatePresence>
+        </AnimatePresence>
       </div>
 
       <AnimatePresence mode="wait">
@@ -449,12 +468,6 @@ export function StrategyManagement({ userId, strategies, checklistItems }: Strat
             exit={{ opacity: 0, y: -10 }}
             className="space-y-4"
           >
-            <div className="flex items-center gap-2 mb-2">
-              <Button variant="ghost" size="sm" onClick={() => setEditingTemplate(null)} className="hover:bg-muted font-medium">
-                <ChevronRight className="rotate-180 mr-1 h-4 w-4" /> 返回列表
-              </Button>
-            </div>
-
             <Card className="border border-border/50 shadow-xl bg-card/50 backdrop-blur-sm overflow-hidden">
               <CardHeader className="flex flex-row items-center justify-between bg-muted/30 pb-4 border-b">
                 <div className="flex-1 space-y-2">
