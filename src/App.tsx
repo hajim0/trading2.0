@@ -136,13 +136,8 @@ export default function App() {
   const effectiveUserId = user?.uid || null;
   
   // --- Feature Gating ---
-  const features = getFeatureAccess(userProfile);
+  const features = getFeatureAccess(userProfile, import.meta.env);
   
-  const canUseTagManagement = features.canUseTagManagement;
-  const canUseTagAnalytics = features.canUseTagAnalytics;
-  const canUseDisciplineAnalysis = features.canUseDisciplineAnalysis;
-  const canUseStrategies = features.canUseStrategies;
-
   // --- Effects ---
   useEffect(() => {
     setIsInIframe(window.self !== window.top);
@@ -453,14 +448,14 @@ export default function App() {
   }, [effectiveUserId, tags]);
 
   const handleRenameTag = useCallback(async (id: string, newName: string) => {
-    if (!effectiveUserId || !canUseTagManagement) return;
+    if (!effectiveUserId || !features.canUseTagManagement) return;
     try {
       const tagRef = doc(db, 'users', effectiveUserId, 'tags', id);
       await updateDoc(tagRef, { name: newName });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${effectiveUserId}/tags/${id}`);
     }
-  }, [effectiveUserId, canUseTagManagement]);
+  }, [effectiveUserId, features.canUseTagManagement]);
 
   const syncTagsToTrades = useCallback(async (
     targetTransactions: Transaction[],
@@ -506,7 +501,7 @@ export default function App() {
   }, [effectiveUserId]);
 
   const handleDeleteTag = useCallback(async (id: string) => {
-    if (!effectiveUserId || !canUseTagManagement) return;
+    if (!effectiveUserId || !features.canUseTagManagement) return;
     const toastId = toast.loading('正在刪除標籤...');
     try {
       const tagRef = doc(db, 'users', effectiveUserId, 'tags', id);
@@ -521,7 +516,7 @@ export default function App() {
       handleFirestoreError(error, OperationType.DELETE, `users/${effectiveUserId}/tags/${id}`);
       toast.error('刪除標籤失敗', { id: toastId });
     }
-  }, [effectiveUserId, canUseTagManagement, transactions, tags, syncTagsToTrades]);
+  }, [effectiveUserId, features.canUseTagManagement, transactions, tags, syncTagsToTrades]);
 
   const handleAdd = useCallback(async (data: Partial<Transaction>) => {
     if (!effectiveUserId) {
@@ -931,7 +926,7 @@ export default function App() {
             icon={BarChart2} 
             label="進階分析" 
             active={currentView === 'analysis'} 
-            locked={!canUseTagAnalytics} 
+            locked={!features.canUseTagAnalysis} 
             onClick={() => { setCurrentView('analysis'); setIsSidebarOpen(false); }} 
           />
           <NavItem 
@@ -944,7 +939,7 @@ export default function App() {
             icon={Tags} 
             label="標籤管理" 
             active={currentView === 'tags'} 
-            locked={!canUseTagManagement} 
+            locked={!features.canUseTagManagement} 
             onClick={() => { setCurrentView('tags'); setIsSidebarOpen(false); }} 
           />
           <NavItem 
@@ -1226,7 +1221,7 @@ export default function App() {
                   onAddGlobalTag={handleAddGlobalTag}
                   onSubmit={handleAdd} 
                   onCancel={() => setCurrentView('dashboard')} 
-                  canManageTags={canUseTagManagement}
+                  canManageTags={features.canUseTagManagement}
                   strategies={strategies}
                   checklistItems={checklistItems}
                   disciplineMode={disciplineMode}
@@ -1253,7 +1248,7 @@ export default function App() {
                     setSelectedTransaction(null);
                     setCurrentView(prev === 'detail' ? 'detail' : 'dashboard');
                   }} 
-                  canManageTags={canUseTagManagement}
+                  canManageTags={features.canUseTagManagement}
                   strategies={strategies}
                   checklistItems={checklistItems}
                   disciplineMode={disciplineMode}
@@ -1602,7 +1597,7 @@ export default function App() {
                 exit={{ opacity: 0, y: -20 }}
                 className="space-y-8"
               >
-                {!features.canUseTagAnalytics && !features.canUseDisciplineAnalysis ? (
+                {!features.canUseTagAnalysis && !features.canUseDisciplineAnalysis ? (
                   <Paywall 
                     featureName="進階數據分析"
                     description="透過標籤獲利統計與紀律度分析，找出您的交易盲點並透過數據提升勝率。"

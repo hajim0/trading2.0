@@ -84,7 +84,7 @@ export interface Transaction {
   entryReason: string;
   review: string;
   tagIds: string[];
-  screenshots: string[]; // Base64 or URLs
+  screenshots: string[]; // HTTPS URLs only. No more base64.
   strategyId?: string;
   checklistScore?: number;
   passedRequiredCheck?: boolean;
